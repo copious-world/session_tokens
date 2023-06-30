@@ -1,0 +1,26 @@
+{
+  "name": "session_tokens",
+  "version": "1.0.0",
+  "description": "A library of classes that can be used to manage sessions and related tokens.",
+  "main": "index.js",
+  "scripts": {
+    "test": "node ntests/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/copious-world/session_tokens.git"
+  },
+  "keywords": [
+    "session",
+    "tokens",
+    "javascript",
+    "typescript",
+    "rust"
+  ],
+  "author": "R. Leddy",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/copious-world/session_tokens/issues"
+  },
+  "homepage": "https://github.com/copious-world/session_tokens#readme"
+}
