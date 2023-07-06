@@ -128,3 +128,8 @@ dist
 
 # rust
 defaults/rs/target/*
+
+# c++
+defaults/cpp/rapidjson
+defaults/cpp/sesstok
+

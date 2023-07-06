@@ -230,11 +230,7 @@ impl TokenTables for LocalSessionTokens {
 
     fn destroy_token(&mut self, token : & TransitionToken) -> () {
 
-        {
-            self.token_to_session.remove(token);
-        }
-
-        if let Some(session_token) = self.token_to_session.get(token) {
+        if let Some(session_token) = self.token_to_session.get(token.clone()) {
             //
             if let Some(sess_token_set) = self.sessions_to_their_tokens.get_mut(session_token) {
                 //
@@ -244,12 +240,13 @@ impl TokenTables for LocalSessionTokens {
                 //
                 let t = Token::TransitionToken(token.to_string());
                 self.token_to_owner.remove(&t);    
-                //
-                ()
-            } else {
-                ()
-            };
+            }
         }
+
+        {
+            self.token_to_session.remove(token);
+        }
+
     }
 
 
