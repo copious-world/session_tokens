@@ -329,6 +329,7 @@ class LocalSessionTokens implements LocalSessionTokensAbstract {
         if ( (value !== undefined) && (t_token !== undefined) ) {
             await this._db.set_key_value(t_token,value)
             this._token_to_information.set(t_token,value)
+            this._token_timing.set(t_token,new TokenTimingInfo())
         }
     }
 
