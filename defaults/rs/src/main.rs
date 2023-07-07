@@ -7,6 +7,8 @@ use std::collections::{HashSet, HashMap};
 use serde::{Deserialize, Serialize};
 use serde_json::{Result,to_string};
 
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+
 
 type Hash = String;
 type SessionToken = String;
@@ -26,7 +28,7 @@ pub enum StructOrString<T> {
     TypeB(T),
 }
 
-// ---- ----
+// ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
 #[allow(non_camel_case_types)]
 type token_lambda = Box<fn (Option<&str>) -> Token>;
@@ -102,9 +104,8 @@ fn default_token_maker(prefix : Option<&str>) -> Token {
 
 
 
-
-
 // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+
 #[derive(Clone)]
 struct SessionTokenSets {
     session_bounded : HashSet<TransitionToken>,
@@ -209,7 +210,6 @@ impl TokenTables for LocalSessionTokens {
 
 
     fn transition_token_is_active(&mut self, token : TransitionToken) -> Option<String> {
-        //
         match self.token_to_information.get(&token) {
             Some(value) => {
                 Some(value.to_string())
@@ -334,7 +334,6 @@ impl TokenTables for LocalSessionTokens {
 
 
     fn transfer_token(&mut self,  t_token : & TransitionToken, yielder_key : & Ucwid,  receiver_key : & Ucwid ) -> () {
-        //
         match self.owner_to_session.get(yielder_key) {
             Some(y_session_token) => {
                 let ysst = y_session_token.to_string();
@@ -366,7 +365,6 @@ impl TokenTables for LocalSessionTokens {
         }
         ()
     }
-
 }
 
 
