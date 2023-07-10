@@ -81,7 +81,7 @@ pub trait TokenTables {
     fn new(db : Box<dyn DB>, token_creator : Option<token_lambda>) -> Self;
     //
     fn decrement_timers(&mut self) -> ();
-    fn set_token_creator(token_creator : Option<token_lambda>) -> ();
+    fn set_token_creator(&mut self, token_creator : Option<token_lambda>) -> ();
     //
     fn add_session(&mut self, session_token : & SessionToken, ownership_key : & Ucwid, o_t_token : Option<TransitionToken>, shared : Option<bool> ) -> Option<Hash>;
     fn active_session(&self, session_token : & SessionToken, ownership_key : & Ucwid) -> Option<bool>;
@@ -102,8 +102,6 @@ pub trait TokenTables {
 
 /*
 interface LocalSessionTokensAbstract {
-    decrement_timers : () => void
-    set_token_creator : (token_creator: token_lambda | undefined) => void
     //
     create_token : ( prefix? : string ) => Token
     add_token : (t_token : TransitionToken, value : string | object ) => Promise<void>
@@ -316,7 +314,7 @@ struct LocalSessionTokens {
     _detached_sessions : HashSet<SessionToken>,
     _orphaned_tokens : HashSet<TransitionToken>,
     //
-    _session_timing : HashMap<SessionToken,SessionTimingInfo>,
+    _session_timing : HashMap<SessionToken, SessionTimingInfo>,
     _all_tranferable_tokens : HashMap<TransitionToken,TransferableTokenInfo>,
     _token_timing : HashMap<TransitionToken,TokenTimingInfo>,
     //
@@ -382,16 +380,7 @@ impl TokenTables for LocalSessionTokens {
         }
     }
 
-    /*
-        fn decrement_timers(&mut self) -> ();
-        fn set_token_creator(token_creator : Option<token_lambda>) -> ();
-        //
-        fn active_session(&self, session_token : & SessionToken, ownership_key : & Ucwid) -> Option<bool>;
-        fn destroy_session(&mut self, token : & TransitionToken) -> ();
-        fn allow_session_detach(&mut self, session_token : SessionToken) -> ();
-        fn detach_session(&mut self, session_token : SessionToken) -> ();
-        fn attach_session(&mut self, session_token : SessionToken) -> ();
-    */
+
 
     fn decrement_timers(&mut self) -> () {
 /*
@@ -446,6 +435,10 @@ impl TokenTables for LocalSessionTokens {
 */
     }
 
+    fn set_token_creator(&mut self, token_creator : Option<token_lambda>) -> () {
+        self._token_creator = token_creator.unwrap();
+    }
+
     fn add_session(&mut self, session_token : & SessionToken, ownership_key : & Ucwid, o_t_token : Option<TransitionToken>, shared :  Option<bool>) -> Option<Hash> {
         let hash_of_p2 = self._db.set_session_key_value(&session_token,ownership_key.to_string());  // await
         self._session_to_owner.insert(session_token.to_string(),ownership_key.to_string());
@@ -454,7 +447,6 @@ impl TokenTables for LocalSessionTokens {
         self._token_to_owner.insert(st,ownership_key.to_string());
         let mut sess_token_set = SessionTokenSets::new();
         //
-        self._sessions_to_their_tokens.insert(session_token.to_string(),sess_token_set);
         match o_t_token {
             Some(t_token) => {
                 self._token_to_session.insert(t_token.to_string(), session_token.to_string());
@@ -467,33 +459,34 @@ impl TokenTables for LocalSessionTokens {
             }
             _ => ()
         }
-        let mut sti : SessionTimingInfo = SessionTimingInfoBuilder::default().build().ok()?;
+        self._sessions_to_their_tokens.insert(session_token.to_string(),sess_token_set);
         //
-        self._session_timing.insert(session_token.to_string(),sti);
-        match shared {
+        let mut sti = SessionTimingInfoBuilder::default().build().ok()?;
+        //
+        let result = match shared {
             Some(share_chk) => {
                 if share_chk {
                     sti._shared = true;
                     let value = serde_json::to_string(&sti).ok()?;
-                    self._db.set_key_value(session_token,value.as_str());    // await 
+                    self._db.set_key_value(&session_token,value.as_str());    // await 
                     Some(hash_of_p2)
                 } else {
                     None
                 }
             }
             _ => None
-        }
-
+        };
+        //
+        self._session_timing.insert(session_token.to_string(),sti);
+        result
     }
-
-
 
     fn active_session(&self, session_token : & SessionToken, ownership_key : & Ucwid) -> Option<bool> {
         //
         match self._session_checking_tokens.get(session_token) {
             Some(hh_unidentified) => {
                 let hh_str : & str = hh_unidentified.as_str();
-                let truth = self._db.check_hash(hh_str,ownership_key.to_string());
+                let truth = self._db.check_hash(hh_str,ownership_key.to_string()); // await
                 Some(truth)
             }
             _ => Some(false)
@@ -516,8 +509,82 @@ impl TokenTables for LocalSessionTokens {
         }
         //
     }
+/*
+    this.attach_session(session_token) // if it might be in the set of detached sessions.
+    //
+    this._session_to_owner.delete(session_token) // the session transition token 
+    this._session_checking_tokens.delete(session_token)
+
+    let time_info = this._session_timing.get(session_token)
+    this._session_timing.delete(session_token)
+    //
+    if ( time_info && time_info._shared ) {
+        (async () => {  // update this shared information
+            await this._db.del_key_value(session_token)
+        })()    
+    }
+    //
+    let token_sets : SessionTokenSets | undefined = this._sessions_to_their_tokens.get(session_token)
+    if ( token_sets !== undefined ) {
+        for ( let token in token_sets.session_carries ) {
+            this._orphaned_tokens.add(token)            // orphaned
+        }
+        for ( let token in token_sets.session_bounded ) {
+            this.destroy_token(token)
+        }
+    }
+    this._sessions_to_their_tokens.delete(session_token);
+    //
+    this._db.del_session_key_value(session_token)
+
+*/
 
 
+    fn allow_session_detach(&mut self, session_token : SessionToken) -> () {
+        match self._session_timing.get_mut(&session_token) {
+            Some(s_time_info) => {
+                s_time_info._is_detached =  true;
+                ()
+            }
+            _ => ()
+        }
+    }
+
+    fn detach_session(&mut self, session_token : SessionToken) -> () {
+        match self._session_timing.get_mut(&session_token) {
+            Some(s_time_info) => {
+                s_time_info._is_detached = false;
+                if s_time_info._shared {
+                    match serde_json::to_string(&s_time_info) {
+                        Ok(value) => {
+                            self._db.set_key_value(&session_token,value.as_str());    // await 
+                            ()        
+                        }
+                        _ => ()
+                    }
+                }
+            }
+            _ => ()
+        }
+    }
+
+    fn attach_session(&mut self, session_token : SessionToken) -> () {
+        match self._session_timing.get_mut(&session_token) {
+            Some(s_time_info) => {
+                s_time_info._detachment_allowed = true;
+                if s_time_info._shared {
+                    match serde_json::to_string(&s_time_info) {
+                        Ok(value) => {
+                            self._db.set_key_value(&session_token,value.as_str());    // await 
+                            ()        
+                        }
+                        _ => ()
+                    }
+                }
+            }
+            _ => ()
+        }
+    }
 
 
     // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
