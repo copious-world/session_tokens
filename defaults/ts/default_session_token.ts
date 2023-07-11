@@ -210,6 +210,7 @@ interface LocalSessionTokensAbstract {
     set_disownment_token_timeout : (t_token : TransitionToken,timeout : Number) => void
     set_token_timeout : (t_token : TransitionToken,timeout : Number) => void
     get_token_timeout : (t_token : TransitionToken)  =>  Number | undefined 
+    get_token_time_left(t_token : TransitionToken) : Number | undefined
     set_token_sellable : (t_token : TransitionToken, amount? : Number) => void
     unset_token_sellable : (t_token : TransitionToken) => void
     //
@@ -542,18 +543,16 @@ class LocalSessionTokens implements LocalSessionTokensAbstract {
                 sess_token_set.session_carries.add(t_token)
                 //
                 let t_info = new TransferableTokenInfo(ownership_key)
-                let store_value : string = ""
                 if ( typeof value === 'string' ) {
-                    store_value = value
                     let o_value = JSON.parse(value)
                     o_value._owner = ownership_key   // just in case
                     value = o_value
-                } else {
-                    store_value = JSON.stringify(value)
                 }
                 t_info.set_all(value)
+                //
                 this._all_tranferable_tokens.set(t_token,t_info) // if it is in this set, it is transferable
                 //
+                let store_value : string = JSON.stringify(value)
                 await this.add_token(t_token,store_value)   // add to token_timing, token_to_info, and db
             }
         }

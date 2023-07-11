@@ -5,7 +5,7 @@ use fastuuid::Generator;
 use std::collections::{HashSet, HashMap};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Result,to_string};
+use serde_json::{Result,to_string,Value};
 
 
 use derive_builder::Builder;
@@ -27,8 +27,8 @@ pub enum Token {
 }
 
 pub enum StructOrString<T> {
-    TypeA(String),
-    TypeB(T),
+    TypeStr(String),
+    TypeGen(T),
 }
 
 // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
@@ -90,49 +90,46 @@ pub trait TokenTables {
     fn detach_session(&mut self, session_token : SessionToken) -> ();
     fn attach_session(&mut self, session_token : SessionToken) -> ();
     //
-    fn create_token(&self, prefix : Option<String> ) -> Token;
-    fn add_token(&mut self, token : TransitionToken, value : StructOrString<Self::Jsonable> ) -> ();
-    fn transition_token_is_active(&mut self, token : TransitionToken) -> Option<String>;
-    fn destroy_token(&mut self, token : & TransitionToken) -> ();
+    fn create_token(&self, prefix : Option<String> ) -> Token;          // await
+    fn add_token(&mut self, token : &TransitionToken, value : StructOrString<Self::Jsonable> ) -> ();
+    fn transition_token_is_active(&mut self, token : & TransitionToken) -> Option<String>;        // await
     fn from_token(&self, token : TransitionToken) -> Ucwid;
-
     fn add_transferable_token(&mut self,  t_token : & TransitionToken, value : StructOrString<Self::Jsonable>, ownership_key : & Ucwid ) -> ();
+    fn add_session_bounded_token(&mut self,  t_token : & TransitionToken, value : StructOrString<Self::Jsonable>, ownership_key : & Ucwid )  -> ();  // => Promise<void>
+    fn acquire_token(&mut self, t_token : & TransitionToken, session_token : & SessionToken, owner : & Ucwid) -> bool;    // => Promise<boolean>
+    fn token_is_transferable(&self,  t_token : &TransitionToken) -> bool;
+    //
     fn transfer_token(&mut self,  t_token : & TransitionToken, yielder_key : & Ucwid,  receiver_key : & Ucwid )  -> ();
+    fn destroy_token(&mut self, token : & TransitionToken) -> ();
+
+    //
+    fn set_general_session_timeout(&mut self, timeout : u32) -> ();
+    fn set_session_timeout(&mut self, session_token : & SessionToken, timeout : u32) -> ();
+    fn get_session_timeout(&mut self, session_token : & SessionToken) -> Option<u32>;
+    fn get_session_time_left(&mut self, session_token : & SessionToken) -> Option<u32>;
+    //
+    fn set_general_token_timeout(&mut self, timeout : u32) -> ();
+    fn set_disownment_token_timeout(&mut self, t_token : & TransitionToken, timeout : u32) -> ();
+    fn set_token_timeout(&mut self, t_token : & TransitionToken,timeout : u32) -> ();
+    fn get_token_timeout(&mut self, t_token : & TransitionToken) -> Option<u32>;
+    fn get_token_time_left(&mut self, t_token : & TransitionToken)  ->  Option<u32>;
+    fn set_token_sellable(&mut self, t_token : & TransitionToken, amount : Option<f32>) -> ();
+    fn unset_token_sellable(&mut self, t_token : & TransitionToken) -> ();
+    //
+    fn reload_session_info(&mut self, session_token : & SessionToken, ownership_key : & Ucwid, hash_of_p2 : Hash) -> bool; // Promise<boolean> 
+    fn reload_token_info(&mut self, t_token : & TransitionToken) -> ();    // : Promise<void>
+    //
+    fn list_tranferable_tokens(&mut self, session_token : & SessionToken) -> Vec<TransitionToken>;
+    fn list_sellable_tokens(&mut self) -> Vec<TransitionToken>;
+    fn list_unassigned_tokens(&mut self) -> Vec<TransitionToken>;
+    fn list_detached_sessions(&mut self) -> Vec<SessionToken>;
+
 }
 
 /*
 interface LocalSessionTokensAbstract {
+
     //
-    create_token : ( prefix? : string ) => Token
-    add_token : (t_token : TransitionToken, value : string | object ) => Promise<void>
-    transition_token_is_active : (t_token : TransitionToken) =>  Promise<boolean | string>
-    from_token : (t_token : TransitionToken) => Ucwid
-    add_transferable_token : ( t_token : TransitionToken, value : string | object, ownership_key : Ucwid ) => Promise<void>
-    add_session_bounded_token : ( t_token : TransitionToken, value : string | object, ownership_key : Ucwid ) => Promise<void>
-    acquire_token : (t_token : TransitionToken, session_token : SessionToken, owner : Ucwid) => Promise<boolean>
-    token_is_transferable : (t_token : TransitionToken)  =>  boolean
-    transfer_token : ( t_token : TransitionToken, yielder_key : Ucwid,  receiver_key : Ucwid ) => void
-    destroy_token : (t_token : TransitionToken) => void
-    //
-    set_general_session_timeout : (timeout : Number) => void
-    set_session_timeout : (session_token : SessionToken,timeout : Number) => void
-    get_session_timeout : (session_token : SessionToken) => Number | undefined
-    get_session_time_left : (session_token : SessionToken) => Number | undefined
-    //
-    set_general_token_timeout : (timeout : Number) => void
-    set_disownment_token_timeout : (t_token : TransitionToken,timeout : Number) => void
-    set_token_timeout : (t_token : TransitionToken,timeout : Number) => void
-    get_token_timeout : (t_token : TransitionToken)  =>  Number | undefined 
-    set_token_sellable : (t_token : TransitionToken, amount? : Number) => void
-    unset_token_sellable : (t_token : TransitionToken) => void
-    //
-    reload_session_info(session_token : SessionToken, ownership_key : Ucwid, hash_of_p2 : Hash) : Promise<boolean> 
-    reload_token_info(t_token : TransitionToken) : Promise<void>
-    //
-    list_tranferable_tokens : (session_token : SessionToken) => TransitionToken[]
-    list_sellable_tokens : () => TransitionToken[]
-    list_unassigned_tokens : () => TransitionToken[]
-    list_detached_sessions : () => SessionToken[]
 }
 
 */
@@ -268,7 +265,7 @@ impl SessionTimingInfo {
  * Many times, a token's timing roles may be manipulated at once. Hence, keeping the token in a table for each case
  * will increase the algorithmic time a token's updates will require.
  */
- #[derive(Clone)]
+#[derive(Clone)]
 #[derive(Builder)]
 struct TokenTimingInfo {
     #[builder(default = "false")]
@@ -324,6 +321,19 @@ struct LocalSessionTokens {
     _session_time_chopper : u32,
     _general_token_timeout : u32,
 }
+
+
+
+fn return_<S,T> (_t_to_thing : & HashMap::<S,T>,  tok : &S) -> Option<T> where S: Eq, S: std::hash::Hash, T: Clone {
+    match _t_to_thing.get(tok) {
+        Some(sts) => {
+            Some(sts.clone())
+        }
+        _ => None
+    }
+}
+
+
 
 
 
@@ -454,8 +464,8 @@ impl TokenTables for LocalSessionTokens {
                 //
                 let tt = Token::TransitionToken(t_token.to_string());
                 self._token_to_owner.insert(tt,ownership_key.to_string());
-                let owk = StructOrString::TypeA(hash_of_p2.to_string());
-                self.add_token(t_token, owk);
+                let owk = StructOrString::TypeStr(hash_of_p2.to_string());
+                self.add_token(&t_token, owk);
             }
             _ => ()
         }
@@ -494,50 +504,44 @@ impl TokenTables for LocalSessionTokens {
     }
 
 
-    fn destroy_session(&mut self, token : & TransitionToken) -> () {
+    fn destroy_session(&mut self, t_token : & TransitionToken) -> () {
         //
-        match self._token_to_session.get(token) {
-            Some(session_token) => {
-                self._session_to_owner.remove(session_token); // the session transition token 
-                self._session_checking_tokens.remove(session_token);
-                let t = Token::TransitionToken(token.to_string());
-                self._token_to_owner.remove(&t);
-                self._sessions_to_their_tokens.remove(session_token);
-                self._db.del_session_key_value(session_token);
+        let session_token = match return_::<TransitionToken,SessionToken>(& self._token_to_session,t_token) {
+            Some(st) => st,
+            _ => "".to_string()
+        };
+        //
+        if session_token.len() > 0 {
+            self._detached_sessions.remove(&session_token);
+            self._session_to_owner.remove(&session_token); // the session transition token 
+            self._session_checking_tokens.remove(&session_token);    
+            if let Some(time_info) = self._session_timing.get_mut(&session_token) {
+                if time_info._shared {
+                    self._db.del_key_value(&session_token.to_string());   // await
+                }
             }
-            _ => ()
-        }
-        //
-    }
-/*
-    this.attach_session(session_token) // if it might be in the set of detached sessions.
-    //
-    this._session_to_owner.delete(session_token) // the session transition token 
-    this._session_checking_tokens.delete(session_token)
+            //
+            self._session_timing.remove(&session_token);
+            let st = Token::SessionToken(session_token.to_string());
+            self._token_to_owner.remove(&st);
+            //
 
-    let time_info = this._session_timing.get(session_token)
-    this._session_timing.delete(session_token)
-    //
-    if ( time_info && time_info._shared ) {
-        (async () => {  // update this shared information
-            await this._db.del_key_value(session_token)
-        })()    
-    }
-    //
-    let token_sets : SessionTokenSets | undefined = this._sessions_to_their_tokens.get(session_token)
-    if ( token_sets !== undefined ) {
-        for ( let token in token_sets.session_carries ) {
-            this._orphaned_tokens.add(token)            // orphaned
-        }
-        for ( let token in token_sets.session_bounded ) {
-            this.destroy_token(token)
+            match return_::<SessionToken,SessionTokenSets>(& self._sessions_to_their_tokens,&session_token) {
+                Some(token_sets) => {
+                    for token in &token_sets.session_carries {
+                        self._orphaned_tokens.insert(token.to_string());            // orphaned
+                    }
+                    for token in &token_sets.session_bounded {
+                        self.destroy_token(&token);
+                    }
+                }
+                _ => ()
+            };
+    
+            self._sessions_to_their_tokens.remove(&session_token);
+            self._db.del_session_key_value(&session_token.to_string());
         }
     }
-    this._sessions_to_their_tokens.delete(session_token);
-    //
-    this._db.del_session_key_value(session_token)
-
-*/
 
 
     fn allow_session_detach(&mut self, session_token : SessionToken) -> () {
@@ -554,6 +558,7 @@ impl TokenTables for LocalSessionTokens {
         match self._session_timing.get_mut(&session_token) {
             Some(s_time_info) => {
                 s_time_info._is_detached = false;
+                self._detached_sessions.insert(session_token.to_string());
                 if s_time_info._shared {
                     match serde_json::to_string(&s_time_info) {
                         Ok(value) => {
@@ -572,6 +577,7 @@ impl TokenTables for LocalSessionTokens {
         match self._session_timing.get_mut(&session_token) {
             Some(s_time_info) => {
                 s_time_info._detachment_allowed = true;
+                self._detached_sessions.remove(&session_token);
                 if s_time_info._shared {
                     match serde_json::to_string(&s_time_info) {
                         Ok(value) => {
@@ -601,34 +607,40 @@ impl TokenTables for LocalSessionTokens {
         }
     }
 
-    fn add_token(&mut self, token : TransitionToken, value : StructOrString<Self::Jsonable> ) -> () {
+    fn add_token(&mut self, t_token : & TransitionToken, value : StructOrString<Self::Jsonable> ) -> () {
         //
         let tval : String;
         match value {
-            StructOrString::TypeA(sval) => {
+            StructOrString::TypeStr(sval) => {
                 tval = sval;
             }
-            StructOrString::TypeB(struct_val) => {
+            StructOrString::TypeGen(struct_val) => {
                 let jval = struct_val.to_string();
                 tval = jval;
             }
         }
 
-        self._db.set_key_value(&token,tval.as_str());
-        self._token_to_information.insert(token,tval);
+        self._db.set_key_value(&t_token,tval.as_str());       // await
+        self._token_to_information.insert(t_token.to_string(),tval);
+
+        let tti = TokenTimingInfoBuilder::default().build().ok();
+        if let Some(tt_info) = tti {
+            self._token_timing.insert(t_token.to_string(),tt_info);
+        }
     }
 
 
-    fn transition_token_is_active(&mut self, token : TransitionToken) -> Option<String> {
-        match self._token_to_information.get(&token) {
+
+    fn transition_token_is_active(&mut self, token : & TransitionToken) -> Option<String> {
+        match self._token_to_information.get(token) {
             Some(value) => {
                 Some(value.to_string())
             }
             _ => {
-                match self._db.get_key_value(&token) {
+                match self._db.get_key_value(token) {
                     Some(db_val) => {
                         let sval : String = db_val.to_string();
-                        self.add_token(token,StructOrString::TypeA(sval.clone()));
+                        self.add_token(token,StructOrString::TypeStr(sval.clone()));
                         Some(sval)
                     }
                     _ => None
@@ -638,26 +650,31 @@ impl TokenTables for LocalSessionTokens {
     }
 
 
-    fn destroy_token(&mut self, token : & TransitionToken) -> () {
-
-        let t = token.clone();
+    fn destroy_token(&mut self, t_token : & TransitionToken) -> () {
+        //
+        let t = t_token.clone();
         if let Some(session_token) = self._token_to_session.get(&t) {
-            //
             if let Some(sess_token_set) = self._sessions_to_their_tokens.get_mut(session_token) {
                 //
-                sess_token_set.clear();
-                let t = token.clone();
-                self._db.del_key_value(&t);
+                sess_token_set.session_bounded.remove(t_token);
+                sess_token_set.session_carries.remove(t_token);
                 //
-                let t = Token::TransitionToken(token.to_string());
-                self._token_to_owner.remove(&t);    
             }
         }
-
+        //
         {
-            self._token_to_session.remove(token);
+            self._token_to_information.remove(t_token);
+            let t : Token = Token::TransitionToken(t_token.to_string());
+            self._token_to_owner.remove(&t);        // This map use the more generic Token enumerated type
+            self._orphaned_tokens.remove(t_token);
+            self._token_timing.remove(t_token);
+            self._all_tranferable_tokens.remove(t_token);
+            self._token_to_session.remove(t_token);
+            //
+            let t = t_token.clone();
+            self._db.del_key_value(&t);
         }
-
+        //
     }
 
 
@@ -670,49 +687,63 @@ impl TokenTables for LocalSessionTokens {
     }
 
 
+    fn add_session_bounded_token(&mut self, t_token : & TransitionToken, value : StructOrString<Self::Jsonable>, ownership_key : & Ucwid )  -> () {
+        if let Some(session_token)  = self._owner_to_session.get(ownership_key) {
+            let sst = session_token.to_string();
+            match self._sessions_to_their_tokens.get_mut(&sst) {
+                Some(sess_token_set) => {
+                    sess_token_set.session_bounded.insert(t_token.to_string());
+                    //
+                    self._token_to_session.insert(t_token.to_string(), session_token.to_string());
+                    let tti = TransferableTokenInfoBuilder::default().build().ok();
+                    if let Some(mut tt_info) = tti {
+                        tt_info._owner = ownership_key.to_string();
+                        self._all_tranferable_tokens.insert(t_token.to_string(),tt_info);
+                        self.add_token(&t_token,value);
+                    }
+                }
+                _ => ()
+            }
+        }
+    }
+
+
     fn add_transferable_token(&mut self,  t_token : & TransitionToken, value : StructOrString<Self::Jsonable>, ownership_key : & Ucwid ) -> () {
-        //
         match self._owner_to_session.get(ownership_key) {
             Some(session_token) => {
                 let sst = session_token.to_string();
                 match self._sessions_to_their_tokens.get_mut(&sst) {
                     Some(sess_token_set) => {
+                        let tt = Token::TransitionToken(t_token.to_string());
+                        self._token_to_owner.insert(tt,ownership_key.to_string());
                         self._token_to_session.insert(t_token.to_string(), sst);
                         sess_token_set.session_carries.insert(t_token.to_string());
-                        self.add_token(t_token.to_string(),value);
-                    }
-                    _ => ()
-                }
-            }
-            _ => ()
-        }
-    }
-
-
-    fn transfer_token(&mut self,  t_token : & TransitionToken, yielder_key : & Ucwid,  receiver_key : & Ucwid ) -> () {
-        match self._owner_to_session.get(yielder_key) {
-            Some(y_session_token) => {
-                let ysst = y_session_token.to_string();
-                match self._sessions_to_their_tokens.get(&ysst) {
-                    Some(sess_token_set) => {
-                        if sess_token_set.session_carries.contains(t_token) {
-                            self.destroy_token(&t_token);
-                            match self._owner_to_session.get(receiver_key) {
-                                Some(r_session_token) => {
-                                    let rsst = r_session_token.to_string();
-                                    self._token_to_session.insert(t_token.to_string(),rsst.to_string());
-                                    match self._sessions_to_their_tokens.get_mut(&rsst) {
-                                        Some(r_sess_token_set) => {
-                                            r_sess_token_set.session_carries.insert(t_token.to_string());
-                                            let t = Token::TransitionToken(t_token.to_string());                            
-                                            self._token_to_owner.insert(t,receiver_key.to_string());
-                                        }
-                                        _ => ()
-                                    }                                              
+                        //
+                        let tti = TransferableTokenInfoBuilder::default().build().ok();
+                        if let Some(mut tt_info) = tti {
+                            tt_info._owner = ownership_key.clone();
+                            let store_value : String;
+                            let deser_val : Value;
+                            match value {
+                                StructOrString::TypeStr(sval) => {
+                                    store_value = sval.clone();
+                                    if let Ok(Some(ssval)) = serde_json::from_str(&sval.as_str()) {
+                                        deser_val = ssval;
+                                    } else {
+                                        return ()
+                                    }
                                 }
-                                _ => ()
-                            }
+                                StructOrString::TypeGen(struct_val) => {
+                                    deser_val = struct_val.clone();
+                                    let jval = struct_val.to_string();
+                                    store_value = jval;
+                                }
+                            };
+                            tt_info.set_all(deser_val);
+                            self._all_tranferable_tokens.insert(t_token.to_string(),tt_info);
+                            self.add_token(&t_token,StructOrString::TypeStr(store_value));
                         }
+                        ()
                     }
                     _ => ()
                 }
@@ -722,7 +753,220 @@ impl TokenTables for LocalSessionTokens {
         ()
     }
 
+    //      token_is_transferable
+    //
+    fn token_is_transferable(&self, t_token : &TransitionToken) -> bool {
+        if let Some(_ttok) = self._all_tranferable_tokens.get(t_token) {
+            return true
+        }
+        return false
+    }
+
+
+    //      acquire_token
+    //
+    fn acquire_token(&mut self, t_token : & TransitionToken, session_token : & SessionToken, owner : & Ucwid) -> bool {
+        if let Some(value) = self.transition_token_is_active(t_token) {
+            self._token_to_session.insert(t_token.to_string(),session_token.to_string());
+            match serde_json::to_string(&value) {
+                Ok(obj) => {
+                    self.add_transferable_token(t_token,StructOrString::TypeStr(obj),owner);
+                    () 
+                }
+                _ => ()
+            };
+            return true;
+        }
+        return false;
+    }
+
+
+    //      transfer_token
+    //
+    fn transfer_token(&mut self,  t_token : & TransitionToken, yielder_key : & Ucwid,  receiver_key : & Ucwid ) -> () {
+        //
+        if self.token_is_transferable(t_token) {
+            let mut t_info_str : String = "".to_string();
+            if let Some(tis) =  self._token_to_information.get(t_token) {  // get this before it is possibly removed
+                t_info_str = tis.to_string();
+            } 
+            match self._owner_to_session.get(yielder_key) {
+                Some(y_session_token) => {
+                    let ysst = y_session_token.to_string();
+                    if !self._orphaned_tokens.contains(t_token) {
+                        match self._sessions_to_their_tokens.get(&ysst) {
+                            Some(sess_token_set) => {
+                                if sess_token_set.session_carries.contains(t_token) {
+                                    self.destroy_token(&t_token);
+                                }
+                            }
+                            _ => ()
+                        }
+                    }
+    
+                    match self._owner_to_session.get(receiver_key) {
+                        Some(r_session_token) => {
+                            let rsst = r_session_token.to_string();
+                            self._token_to_information.insert(t_token.to_string(),t_info_str.to_string());
+                            if let Some(value) = self.transition_token_is_active(t_token) { //  await 
+                                self.add_transferable_token(t_token, StructOrString::TypeStr(value), receiver_key);
+                            }
+                            self._token_to_session.insert(t_token.to_string(),rsst.to_string());
+                            match self._sessions_to_their_tokens.get_mut(&rsst) {
+                                Some(r_sess_token_set) => {
+                                    r_sess_token_set.session_carries.insert(t_token.to_string());
+                                    let t = Token::TransitionToken(t_token.to_string());                            
+                                    self._token_to_owner.insert(t,receiver_key.to_string());
+                                }
+                                _ => ()
+                            }                                              
+                        }
+                        _ => ()
+                    }
+    
+                }
+                _ => ()
+            }
+        }
+        ()
+    }
+
     // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+
+
+
+    fn set_general_session_timeout(&mut self, timeout : u32) -> () {
+        self._general_token_timeout = timeout
+    }
+
+    fn set_session_timeout(&mut self, session_token : & SessionToken, timeout : u32) -> () {
+        if let Some(s_time_info) = self._session_timing.get_mut(session_token) {
+            s_time_info._time_allotted = timeout;
+            s_time_info._time_left = timeout;
+            if s_time_info._shared {
+                if let Ok(value) = serde_json::to_string(s_time_info) {
+                    self._db.set_key_value(session_token,value.as_str()); // await
+                }
+            }
+        }
+    }
+
+
+    fn get_session_timeout(&mut self, session_token : & SessionToken) -> Option<u32> {
+        if let Some(s_time_info) = self._session_timing.get(session_token) {
+            return Some(s_time_info._time_allotted)
+        }
+        None
+    }
+
+    fn get_session_time_left(&mut self, session_token : & SessionToken) -> Option<u32> {
+        if let Some(s_time_info) = self._session_timing.get(session_token) {
+            return Some(s_time_info._time_left)
+        }
+        None
+    }
+
+    //
+    fn set_general_token_timeout(&mut self, timeout : u32) -> () {
+        self._general_token_timeout = timeout;
+    }
+
+    fn set_disownment_token_timeout(&mut self, t_token : & TransitionToken, timeout : u32) -> () {
+        if let Some(time_info) = self._token_timing.get_mut(t_token) {
+            time_info._time_left_after_detachment = timeout;
+        }
+    }
+
+    fn set_token_timeout(&mut self, t_token : & TransitionToken,timeout : u32) -> () {
+        if let Some(time_info) = self._token_timing.get_mut(t_token) {
+            time_info._time_allotted = timeout;
+            time_info._time_left = timeout;
+        }
+    }
+
+    fn get_token_timeout(&mut self, t_token : & TransitionToken)  ->  Option<u32> {
+        if let Some(time_info) = self._token_timing.get_mut(t_token) {
+            return Some(time_info._time_allotted)
+        }
+        None
+    }
+
+    fn get_token_time_left(&mut self, t_token : & TransitionToken)  ->  Option<u32> {
+        if let Some(time_info) = self._token_timing.get_mut(t_token) {
+            return Some(time_info._time_allotted)
+        }
+        None
+    }
+
+
+    fn set_token_sellable(&mut self, t_token : & TransitionToken, amount : Option<f32>) -> () {
+        if let Some(tinf) = self._all_tranferable_tokens.get_mut(t_token) {
+            if let Some(amt) = amount {
+                tinf._price = amt;
+            }
+            tinf._sellable = true;
+        }
+    }
+
+
+    fn unset_token_sellable(&mut self, t_token : & TransitionToken) -> () {
+        if let Some(tinf) = self._all_tranferable_tokens.get_mut(t_token) {
+            tinf._sellable = true;
+        }
+    }
+
+
+    //
+    fn reload_session_info(&mut self, session_token : & SessionToken, ownership_key : & Ucwid, hash_of_p2 : Hash) -> bool {
+        if let Some(data) = self._db.get_key_value(session_token) {   // await
+            if let Some(truth) = self.active_session(session_token, ownership_key) { // await
+                if truth {
+                    if let Ok(Some(stored_info)) = serde_json::from_str(&data) {
+                        let s_info_q = SessionTimingInfoBuilder::default().build().ok();
+                        if let Some(mut s_info) = s_info_q {
+                            s_info.set_all(stored_info);
+                            self._session_timing.insert(session_token.to_string(),s_info);
+                        }
+                        self._session_checking_tokens.insert(session_token.to_string(),hash_of_p2);
+                        return true
+                    }    
+                }
+            }
+        }
+        return false
+    }
+
+
+    fn reload_token_info(&mut self, t_token : & TransitionToken) -> () {    // promise
+        if let Some(data) = self._db.get_key_value(t_token) {   // await
+            if let Ok(Some(stored_info)) = serde_json::from_str(&data) {
+                let t_info_q = TokenTimingInfoBuilder::default().build().ok();
+                if let Some(mut t_info) = t_info_q {
+                    t_info.set_all(stored_info);
+                    self._token_timing.insert(t_token.to_string(),t_info);
+                }
+            }    
+        }
+    }
+
+
+    //
+    fn list_tranferable_tokens(&mut self, session_token : & SessionToken) -> Vec<TransitionToken> {
+        let v = Vec::new();
+        v
+    }
+    fn list_sellable_tokens(&mut self) -> Vec<TransitionToken> {
+        let v = Vec::new();
+        v
+    }
+    fn list_unassigned_tokens(&mut self) -> Vec<TransitionToken> {
+        let v = Vec::new();
+        v
+    }
+    fn list_detached_sessions(&mut self) -> Vec<SessionToken> {
+        let v = Vec::new();
+        v
+    }
 
 
 }
