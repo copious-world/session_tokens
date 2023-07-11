@@ -5,7 +5,7 @@ use fastuuid::Generator;
 use std::collections::{HashSet, HashMap};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Result,to_string,Value};
+use serde_json::{Value};
 
 
 use derive_builder::Builder;
@@ -40,9 +40,9 @@ type token_lambda = Box<fn (Option<&str>) -> Token>;
 
 const SESSION_PEFIX : &str = "user+";
 
-const MINUTES : u32 = 1000*60;
-const GENERAL_DEFAULT_SESSION_TIMEOUT : u32 = 60*MINUTES;
-const SESSION_CHOP_INTERVAL : u32 = 500;
+const MINUTES : i32 = 1000*60;
+const GENERAL_DEFAULT_SESSION_TIMEOUT : i32 = 60*MINUTES;
+const SESSION_CHOP_INTERVAL : i32 = 500;
 
 
 // ---- ----
@@ -103,16 +103,16 @@ pub trait TokenTables {
     fn destroy_token(&mut self, token : & TransitionToken) -> ();
 
     //
-    fn set_general_session_timeout(&mut self, timeout : u32) -> ();
-    fn set_session_timeout(&mut self, session_token : & SessionToken, timeout : u32) -> ();
-    fn get_session_timeout(&mut self, session_token : & SessionToken) -> Option<u32>;
-    fn get_session_time_left(&mut self, session_token : & SessionToken) -> Option<u32>;
+    fn set_general_session_timeout(&mut self, timeout : i32) -> ();
+    fn set_session_timeout(&mut self, session_token : & SessionToken, timeout : i32) -> ();
+    fn get_session_timeout(&mut self, session_token : & SessionToken) -> Option<i32>;
+    fn get_session_time_left(&mut self, session_token : & SessionToken) -> Option<i32>;
     //
-    fn set_general_token_timeout(&mut self, timeout : u32) -> ();
-    fn set_disownment_token_timeout(&mut self, t_token : & TransitionToken, timeout : u32) -> ();
-    fn set_token_timeout(&mut self, t_token : & TransitionToken,timeout : u32) -> ();
-    fn get_token_timeout(&mut self, t_token : & TransitionToken) -> Option<u32>;
-    fn get_token_time_left(&mut self, t_token : & TransitionToken)  ->  Option<u32>;
+    fn set_general_token_timeout(&mut self, timeout : i32) -> ();
+    fn set_disownment_token_timeout(&mut self, t_token : & TransitionToken, timeout : i32) -> ();
+    fn set_token_timeout(&mut self, t_token : & TransitionToken,timeout : i32) -> ();
+    fn get_token_timeout(&mut self, t_token : & TransitionToken) -> Option<i32>;
+    fn get_token_time_left(&mut self, t_token : & TransitionToken)  ->  Option<i32>;
     fn set_token_sellable(&mut self, t_token : & TransitionToken, amount : Option<f32>) -> ();
     fn unset_token_sellable(&mut self, t_token : & TransitionToken) -> ();
     //
@@ -236,11 +236,11 @@ struct SessionTimingInfo {
     #[builder(default = "false")]
     _is_detached : bool,  // a session is detached when its owner has logged out but returning is allowed
     #[builder(default = "GENERAL_DEFAULT_SESSION_TIMEOUT")]
-    _time_left : u32,
+    _time_left : i32,
     #[builder(default = "GENERAL_DEFAULT_SESSION_TIMEOUT")]
-    _time_left_after_detachment : u32,
+    _time_left_after_detachment : i32,
     #[builder(default = "GENERAL_DEFAULT_SESSION_TIMEOUT")]
-    _time_allotted : u32,
+    _time_allotted : i32,
     #[builder(default = "false")]
     _shared : bool,
  }
@@ -273,11 +273,11 @@ struct TokenTimingInfo {
     #[builder(default = "false")]
     _is_detached : bool,  // a session is detached when its owner has logged out but returning is allowed
     #[builder(default = "GENERAL_DEFAULT_SESSION_TIMEOUT")]
-    _time_left : u32,
+    _time_left : i32,
     #[builder(default = "GENERAL_DEFAULT_SESSION_TIMEOUT")]
-    _time_left_after_detachment : u32,
+    _time_left_after_detachment : i32,
     #[builder(default = "GENERAL_DEFAULT_SESSION_TIMEOUT")]
-    _time_allotted : u32,
+    _time_allotted : i32,
  }
 
 impl TokenTimingInfo {
@@ -317,9 +317,9 @@ struct LocalSessionTokens {
     //
     _token_creator : token_lambda,
     //
-    _general_session_timeout : u32,
-    _session_time_chopper : u32,
-    _general_token_timeout : u32,
+    _general_session_timeout : i32,
+    _session_time_chopper : i32,
+    _general_token_timeout : i32,
 }
 
 
@@ -386,63 +386,74 @@ impl TokenTables for LocalSessionTokens {
             _token_creator : tl,
             _general_session_timeout : general_session_timeout,
             _session_time_chopper : 0,
-            _general_token_timeout : u32::MAX,
+            _general_token_timeout : i32::MAX,
         }
     }
 
 
 
     fn decrement_timers(&mut self) -> () {
-/*
-        for ( let [sess_tok,time_info] of Object.entries(this._session_timing) ) {
-            if ( time_info._is_detached ) {
-                let time_left = time_info._time_left_after_detachment
-                time_left -= SESSION_CHOP_INTERVAL;
-                if ( time_left <= 0 ) {
-                    this._session_timing.delete(sess_tok)
-                    this.destroy_token(sess_tok)
-                } else {
-                    time_info._time_left_after_detachment = time_left
-                }
-            } else {
-                let time_left = time_info._time_left
-                time_left -= SESSION_CHOP_INTERVAL;
-                if ( time_left <= 0 ) {
-                    this._session_timing.delete(sess_tok)
-                    this.destroy_token(sess_tok)
-                }  else {
-                    time_info.time_left = time_left
-                }
-            }
+        //
+        {
+            let mut to_destory = Vec::<SessionToken>::new();
+            let its = self._session_timing.iter_mut();
             //
-            if ( time_info.shared ) { // session information only
-                (async () => {  // update this shared information
-                    await this._db.set_key_value(sess_tok,JSON.stringify(time_info))
-                })()    
-            }
-        }
-        for ( let [t_tok,time_info] of Object.entries(this._token_timing) ) {
-            if ( time_info._is_detached ) {
-                let time_left = time_info._time_left_after_detachment
-                time_left -= SESSION_CHOP_INTERVAL;
-                if ( time_left <= 0 ) {
-                    this._token_timing.delete(t_tok)
-                    this.destroy_token(t_tok)
+            for (sess_tok, time_info) in its {
+                if time_info._is_detached {
+                    let mut time_left = time_info._time_left_after_detachment;
+                    time_left -= SESSION_CHOP_INTERVAL;
+                    if time_left <= 0 {
+                        to_destory.push(sess_tok.to_string());
+                    } else {
+                        (*time_info)._time_left_after_detachment = time_left;
+                    }
                 } else {
-                    time_info._time_left_after_detachment = time_left
+                    let mut time_left = time_info._time_left;
+                    time_left -= SESSION_CHOP_INTERVAL;
+                    if time_left <= 0 {
+                        to_destory.push(sess_tok.to_string());
+                    }  else {
+                        (*time_info)._time_left = time_left;
+                    }
                 }
-            } else {
-                let time_left = time_info._time_left
-                time_left -= SESSION_CHOP_INTERVAL;
-                if ( time_left <= 0 ) {
-                    this._token_timing.delete(t_tok)
-                    this.destroy_token(t_tok)
-                }  else {
-                    time_info.time_left = time_left
+            }
+            if to_destory.len() > 0 {
+                for sess_tok in to_destory {
+                    self._session_timing.remove(&sess_tok);
+                    self.destroy_token(&sess_tok);
                 }
             }
         }
-*/
+        {
+            let mut to_destory = Vec::<TransitionToken>::new();
+            let its = self._token_timing.iter_mut();
+            //
+            for (sess_tok, time_info) in its {
+                if time_info._is_detached {
+                    let mut time_left = time_info._time_left_after_detachment;
+                    time_left -= SESSION_CHOP_INTERVAL;
+                    if time_left <= 0 {
+                        to_destory.push(sess_tok.to_string());
+                    } else {
+                        (*time_info)._time_left_after_detachment = time_left;
+                    }
+                } else {
+                    let mut time_left = time_info._time_left;
+                    time_left -= SESSION_CHOP_INTERVAL;
+                    if time_left <= 0 {
+                        to_destory.push(sess_tok.to_string());
+                    }  else {
+                        (*time_info)._time_left = time_left;
+                    }
+                }
+            }
+            if to_destory.len() > 0 {
+                for sess_tok in to_destory {
+                    self._token_timing.remove(&sess_tok);
+                    self.destroy_token(&sess_tok);
+                }
+            }
+        }
     }
 
     fn set_token_creator(&mut self, token_creator : Option<token_lambda>) -> () {
@@ -514,7 +525,7 @@ impl TokenTables for LocalSessionTokens {
         if session_token.len() > 0 {
             self._detached_sessions.remove(&session_token);
             self._session_to_owner.remove(&session_token); // the session transition token 
-            self._session_checking_tokens.remove(&session_token);    
+            self._session_checking_tokens.remove(&session_token);
             if let Some(time_info) = self._session_timing.get_mut(&session_token) {
                 if time_info._shared {
                     self._db.del_key_value(&session_token.to_string());   // await
@@ -835,11 +846,11 @@ impl TokenTables for LocalSessionTokens {
 
 
 
-    fn set_general_session_timeout(&mut self, timeout : u32) -> () {
+    fn set_general_session_timeout(&mut self, timeout : i32) -> () {
         self._general_token_timeout = timeout
     }
 
-    fn set_session_timeout(&mut self, session_token : & SessionToken, timeout : u32) -> () {
+    fn set_session_timeout(&mut self, session_token : & SessionToken, timeout : i32) -> () {
         if let Some(s_time_info) = self._session_timing.get_mut(session_token) {
             s_time_info._time_allotted = timeout;
             s_time_info._time_left = timeout;
@@ -852,14 +863,14 @@ impl TokenTables for LocalSessionTokens {
     }
 
 
-    fn get_session_timeout(&mut self, session_token : & SessionToken) -> Option<u32> {
+    fn get_session_timeout(&mut self, session_token : & SessionToken) -> Option<i32> {
         if let Some(s_time_info) = self._session_timing.get(session_token) {
             return Some(s_time_info._time_allotted)
         }
         None
     }
 
-    fn get_session_time_left(&mut self, session_token : & SessionToken) -> Option<u32> {
+    fn get_session_time_left(&mut self, session_token : & SessionToken) -> Option<i32> {
         if let Some(s_time_info) = self._session_timing.get(session_token) {
             return Some(s_time_info._time_left)
         }
@@ -867,31 +878,31 @@ impl TokenTables for LocalSessionTokens {
     }
 
     //
-    fn set_general_token_timeout(&mut self, timeout : u32) -> () {
+    fn set_general_token_timeout(&mut self, timeout : i32) -> () {
         self._general_token_timeout = timeout;
     }
 
-    fn set_disownment_token_timeout(&mut self, t_token : & TransitionToken, timeout : u32) -> () {
+    fn set_disownment_token_timeout(&mut self, t_token : & TransitionToken, timeout : i32) -> () {
         if let Some(time_info) = self._token_timing.get_mut(t_token) {
             time_info._time_left_after_detachment = timeout;
         }
     }
 
-    fn set_token_timeout(&mut self, t_token : & TransitionToken,timeout : u32) -> () {
+    fn set_token_timeout(&mut self, t_token : & TransitionToken,timeout : i32) -> () {
         if let Some(time_info) = self._token_timing.get_mut(t_token) {
             time_info._time_allotted = timeout;
             time_info._time_left = timeout;
         }
     }
 
-    fn get_token_timeout(&mut self, t_token : & TransitionToken)  ->  Option<u32> {
+    fn get_token_timeout(&mut self, t_token : & TransitionToken)  ->  Option<i32> {
         if let Some(time_info) = self._token_timing.get_mut(t_token) {
             return Some(time_info._time_allotted)
         }
         None
     }
 
-    fn get_token_time_left(&mut self, t_token : & TransitionToken)  ->  Option<u32> {
+    fn get_token_time_left(&mut self, t_token : & TransitionToken)  ->  Option<i32> {
         if let Some(time_info) = self._token_timing.get_mut(t_token) {
             return Some(time_info._time_allotted)
         }
@@ -952,19 +963,59 @@ impl TokenTables for LocalSessionTokens {
 
     //
     fn list_tranferable_tokens(&mut self, session_token : & SessionToken) -> Vec<TransitionToken> {
-        let v = Vec::new();
+        let mut v = Vec::<TransitionToken>::new();
+        match self._session_timing.get(session_token) {
+            Some(s_time_info) => {
+                if s_time_info._detachment_allowed {
+                    match return_::<SessionToken,SessionTokenSets>(& self._sessions_to_their_tokens,&session_token) {
+                        Some(token_sets) => {
+                            for token in &token_sets.session_carries {
+                                v.push(token.to_string());
+                            }
+                        }
+                        _ => ()
+                    };
+                }
+                ()
+            }
+            _ => ()
+        };
+        //
         v
     }
+
+
+    //
+    //
     fn list_sellable_tokens(&mut self) -> Vec<TransitionToken> {
-        let v = Vec::new();
+        let mut v = Vec::<TransitionToken>::new();
+        let its = self._all_tranferable_tokens.iter().collect::<Vec<_>>();
+        for (token, t_info) in &its {
+            if t_info._sellable {
+                v.push(token.to_string());
+            }
+        }
         v
     }
-    fn list_unassigned_tokens(&mut self) -> Vec<TransitionToken> {
-        let v = Vec::new();
+
+    //
+    fn list_unassigned_tokens(&mut self) -> Vec<TransitionToken> {  // _orphaned_tokens
+        let mut v = Vec::<TransitionToken>::new();
+        let its = self._orphaned_tokens.iter().collect::<Vec<_>>();
+        for token in &its {
+            v.push(token.to_string());
+        }
         v
     }
-    fn list_detached_sessions(&mut self) -> Vec<SessionToken> {
-        let v = Vec::new();
+
+    //
+    //
+    fn list_detached_sessions(&mut self) -> Vec<SessionToken> {  // _detached_sessions
+        let mut v = Vec::<SessionToken>::new();
+        let its = self._detached_sessions.iter().collect::<Vec<_>>();
+        for token in &its {
+            v.push(token.to_string());
+        }
         v
     }
 
