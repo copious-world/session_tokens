@@ -3,12 +3,21 @@
 use std::str;
 use fastuuid::Generator;
 use std::collections::{HashSet, HashMap};
+//
+//use std::future;
+use async_trait::async_trait;
+use async_std::prelude::*;
+
+use futures::future;
+
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value};
 
-
 use derive_builder::Builder;
+use std::pin::Pin;
+use std::marker::PhantomData;
+
 
 // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
@@ -53,38 +62,27 @@ pub trait SessionTokenTraits {
 }
 
 
-/*
-#![feature(async_fn_in_trait)]
-
-trait Database {
-    async fn fetch_data(&self) -> String;
-}
-
-impl Database for MyDb {
-    async fn fetch_data(&self) -> String { ... }
-}
-*/
-
-pub trait DB {
-    fn set_session_key_value(&self, session_token : & SessionToken, ownership_key : Ucwid ) -> Hash;
+#[async_trait]
+pub trait DB<'a>: Sync + Send {
+    async fn set_session_key_value(&self, session_token : & SessionToken, ownership_key : Ucwid ) -> Hash;
     fn del_session_key_value(&self, session_token : & SessionToken ) -> bool;
     fn set_key_value(&self, token : & TransitionToken, value : &str )  -> ();
-    fn get_key_value(&self, token : & TransitionToken )  -> Option<&str>;
+    async fn get_key_value(&self, token : & TransitionToken )  -> Option<&str>;
     fn del_key_value(&self, token : & TransitionToken )  -> ();
-    fn check_hash(&self, hh_unidentified : &str, ownership_key : Ucwid )  -> bool;
+    async fn check_hash(&self, hh_unidentified : &str, ownership_key : Ucwid )  -> bool;
 }
 
-
-pub trait TokenTables {
+#[async_trait]
+pub trait TokenTables<'a, D: DB<'a>> {
     type Jsonable;
     //
-    fn new(db : Box<dyn DB>, token_creator : Option<token_lambda>) -> Self;
+    fn new(db : D, token_creator : Option<token_lambda>) -> Self;
     //
     fn decrement_timers(&mut self) -> ();
     fn set_token_creator(&mut self, token_creator : Option<token_lambda>) -> ();
     //
-    fn add_session(&mut self, session_token : & SessionToken, ownership_key : & Ucwid, o_t_token : Option<TransitionToken>, shared : Option<bool> ) -> Option<Hash>;
-    fn active_session(&self, session_token : & SessionToken, ownership_key : & Ucwid) -> Option<bool>;
+    async fn add_session(&mut self, session_token : & SessionToken, ownership_key : & Ucwid, o_t_token : Option<TransitionToken>, shared : Option<bool> ) -> Option<Hash>;
+    async fn active_session(&self, session_token : & SessionToken, ownership_key : & Ucwid) -> Option<bool>;
     fn destroy_session(&mut self, token : & TransitionToken) -> ();
     fn allow_session_detach(&mut self, session_token : SessionToken) -> ();
     fn detach_session(&mut self, session_token : SessionToken) -> ();
@@ -92,14 +90,14 @@ pub trait TokenTables {
     //
     fn create_token(&self, prefix : Option<String> ) -> Token;          // await
     fn add_token(&mut self, token : &TransitionToken, value : StructOrString<Self::Jsonable> ) -> ();
-    fn transition_token_is_active(&mut self, token : & TransitionToken) -> Option<String>;        // await
+    async fn transition_token_is_active(&mut self, token : & TransitionToken) -> Option<String>;        // await
     fn from_token(&self, token : TransitionToken) -> Ucwid;
     fn add_transferable_token(&mut self,  t_token : & TransitionToken, value : StructOrString<Self::Jsonable>, ownership_key : & Ucwid ) -> ();
     fn add_session_bounded_token(&mut self,  t_token : & TransitionToken, value : StructOrString<Self::Jsonable>, ownership_key : & Ucwid )  -> ();  // => Promise<void>
-    fn acquire_token(&mut self, t_token : & TransitionToken, session_token : & SessionToken, owner : & Ucwid) -> bool;    // => Promise<boolean>
+    async fn acquire_token(&mut self, t_token : & TransitionToken, session_token : & SessionToken, owner : & Ucwid) -> bool;    // => Promise<boolean>
     fn token_is_transferable(&self,  t_token : &TransitionToken) -> bool;
     //
-    fn transfer_token(&mut self,  t_token : & TransitionToken, yielder_key : & Ucwid,  receiver_key : & Ucwid )  -> ();
+    async fn transfer_token(&mut self,  t_token : & TransitionToken, yielder_key : & Ucwid,  receiver_key : & Ucwid )  -> ();
     fn destroy_token(&mut self, token : & TransitionToken) -> ();
 
     //
@@ -116,8 +114,8 @@ pub trait TokenTables {
     fn set_token_sellable(&mut self, t_token : & TransitionToken, amount : Option<f32>) -> ();
     fn unset_token_sellable(&mut self, t_token : & TransitionToken) -> ();
     //
-    fn reload_session_info(&mut self, session_token : & SessionToken, ownership_key : & Ucwid, hash_of_p2 : Hash) -> bool; // Promise<boolean> 
-    fn reload_token_info(&mut self, t_token : & TransitionToken) -> ();    // : Promise<void>
+    async fn reload_session_info(&mut self, session_token : & SessionToken, ownership_key : & Ucwid, hash_of_p2 : Hash) -> bool; // Promise<boolean> 
+    async fn reload_token_info(&mut self, t_token : & TransitionToken) -> ();    // : Promise<void>
     //
     fn list_tranferable_tokens(&mut self, session_token : & SessionToken) -> Vec<TransitionToken>;
     fn list_sellable_tokens(&mut self) -> Vec<TransitionToken>;
@@ -126,13 +124,7 @@ pub trait TokenTables {
 
 }
 
-/*
-interface LocalSessionTokensAbstract {
 
-    //
-}
-
-*/
 
 // ---- ----
 
@@ -297,9 +289,9 @@ impl TokenTimingInfo {
 // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
 
-struct LocalSessionTokens {
+struct LocalSessionTokens< D: for<'a> DB<'a> + std::marker::Unpin > {
     //
-    _db : Box<dyn DB>,
+    _db : D,
     //
     _session_to_owner : HashMap<SessionToken,Ucwid>,
     _owner_to_session : HashMap<Ucwid,SessionToken>,  
@@ -336,11 +328,11 @@ fn return_<S,T> (_t_to_thing : & HashMap::<S,T>,  tok : &S) -> Option<T> where S
 
 
 
-
-impl TokenTables for LocalSessionTokens {
+#[async_trait]
+impl<D: for<'a> DB<'a> + std::marker::Unpin> TokenTables<'_, D> for LocalSessionTokens<D> {
     type Jsonable = serde_json::Value;
     //
-    fn new(db : Box<dyn DB>, token_creator : Option<token_lambda>) -> LocalSessionTokens {
+    fn new(db : D, token_creator : Option<token_lambda>) -> LocalSessionTokens<D> {
         let s_to_o = HashMap::<SessionToken,Ucwid>::new();
         let o_to_s = HashMap::<Ucwid,SessionToken>::new();
         let t_to_o = HashMap::<Token,Ucwid>::new();
@@ -460,8 +452,8 @@ impl TokenTables for LocalSessionTokens {
         self._token_creator = token_creator.unwrap();
     }
 
-    fn add_session(&mut self, session_token : & SessionToken, ownership_key : & Ucwid, o_t_token : Option<TransitionToken>, shared :  Option<bool>) -> Option<Hash> {
-        let hash_of_p2 = self._db.set_session_key_value(&session_token,ownership_key.to_string());  // await
+    async fn add_session(&mut self, session_token : & SessionToken, ownership_key : & Ucwid, o_t_token : Option<TransitionToken>, shared :  Option<bool>) -> Option<Hash> {
+        let hash_of_p2 = self._db.set_session_key_value(&session_token,ownership_key.to_string()).await;  // await
         self._session_to_owner.insert(session_token.to_string(),ownership_key.to_string());
         self._session_checking_tokens.insert(session_token.to_string(),hash_of_p2.to_string());
         let st = Token::SessionToken(session_token.to_string());
@@ -502,12 +494,12 @@ impl TokenTables for LocalSessionTokens {
         result
     }
 
-    fn active_session(&self, session_token : & SessionToken, ownership_key : & Ucwid) -> Option<bool> {
+    async fn active_session(&self, session_token : & SessionToken, ownership_key : & Ucwid) -> Option<bool> {
         //
         match self._session_checking_tokens.get(session_token) {
             Some(hh_unidentified) => {
                 let hh_str : & str = hh_unidentified.as_str();
-                let truth = self._db.check_hash(hh_str,ownership_key.to_string()); // await
+                let truth = self._db.check_hash(hh_str,ownership_key.to_string()).await; // await
                 Some(truth)
             }
             _ => Some(false)
@@ -642,13 +634,13 @@ impl TokenTables for LocalSessionTokens {
 
 
 
-    fn transition_token_is_active(&mut self, token : & TransitionToken) -> Option<String> {
+    async fn transition_token_is_active(&mut self, token : & TransitionToken) -> Option<String> {
         match self._token_to_information.get(token) {
             Some(value) => {
                 Some(value.to_string())
             }
             _ => {
-                match self._db.get_key_value(token) {
+                match self._db.get_key_value(token).await {
                     Some(db_val) => {
                         let sval : String = db_val.to_string();
                         self.add_token(token,StructOrString::TypeStr(sval.clone()));
@@ -776,8 +768,8 @@ impl TokenTables for LocalSessionTokens {
 
     //      acquire_token
     //
-    fn acquire_token(&mut self, t_token : & TransitionToken, session_token : & SessionToken, owner : & Ucwid) -> bool {
-        if let Some(value) = self.transition_token_is_active(t_token) {
+    async fn acquire_token(&mut self, t_token : & TransitionToken, session_token : & SessionToken, owner : & Ucwid) -> bool {
+        if let Some(value) = self.transition_token_is_active(t_token).await {
             self._token_to_session.insert(t_token.to_string(),session_token.to_string());
             match serde_json::to_string(&value) {
                 Ok(obj) => {
@@ -794,7 +786,7 @@ impl TokenTables for LocalSessionTokens {
 
     //      transfer_token
     //
-    fn transfer_token(&mut self,  t_token : & TransitionToken, yielder_key : & Ucwid,  receiver_key : & Ucwid ) -> () {
+    async fn transfer_token(&mut self,  t_token : & TransitionToken, yielder_key : & Ucwid,  receiver_key : & Ucwid ) -> () {
         //
         if self.token_is_transferable(t_token) {
             let mut t_info_str : String = "".to_string();
@@ -819,7 +811,7 @@ impl TokenTables for LocalSessionTokens {
                         Some(r_session_token) => {
                             let rsst = r_session_token.to_string();
                             self._token_to_information.insert(t_token.to_string(),t_info_str.to_string());
-                            if let Some(value) = self.transition_token_is_active(t_token) { //  await 
+                            if let Some(value) = self.transition_token_is_active(t_token).await { //  await 
                                 self.add_transferable_token(t_token, StructOrString::TypeStr(value), receiver_key);
                             }
                             self._token_to_session.insert(t_token.to_string(),rsst.to_string());
@@ -928,9 +920,9 @@ impl TokenTables for LocalSessionTokens {
 
 
     //
-    fn reload_session_info(&mut self, session_token : & SessionToken, ownership_key : & Ucwid, hash_of_p2 : Hash) -> bool {
-        if let Some(data) = self._db.get_key_value(session_token) {   // await
-            if let Some(truth) = self.active_session(session_token, ownership_key) { // await
+    async fn reload_session_info(&mut self, session_token : & SessionToken, ownership_key : & Ucwid, hash_of_p2 : Hash) -> bool {
+        if let Some(data) = self._db.get_key_value(session_token).await {   // await
+            if let Some(truth) = self.active_session(session_token, ownership_key).await { // await
                 if truth {
                     if let Ok(Some(stored_info)) = serde_json::from_str(&data) {
                         let s_info_q = SessionTimingInfoBuilder::default().build().ok();
@@ -948,8 +940,8 @@ impl TokenTables for LocalSessionTokens {
     }
 
 
-    fn reload_token_info(&mut self, t_token : & TransitionToken) -> () {    // promise
-        if let Some(data) = self._db.get_key_value(t_token) {   // await
+    async fn reload_token_info(&mut self, t_token : & TransitionToken) -> () {    // promise
+        if let Some(data) = self._db.get_key_value(t_token).await {   // await
             if let Ok(Some(stored_info)) = serde_json::from_str(&data) {
                 let t_info_q = TokenTimingInfoBuilder::default().build().ok();
                 if let Some(mut t_info) = t_info_q {
@@ -958,6 +950,8 @@ impl TokenTables for LocalSessionTokens {
                 }
             }    
         }
+
+        future::ready(()).await;
     }
 
 
@@ -1065,3 +1059,5 @@ fn main() {
     //
     println!("IDs Listed!");
 }
+
+
