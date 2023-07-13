@@ -8,11 +8,53 @@ The implementations vary in terms of the language used, the types of data struct
 
 #### *<u>currently providing</u>*
 
-* **TypeScript**
-* **JavaScript**
-* **C++**
-* **Rust**
-* **V**
+* **JavaScript**	--	in use -- alpha
+* **TypeScript**	-- producing JS
+* **C++**		-- (work in progress: status - compiled module)
+* **Rust**	-- (work in progress: status - compiled module)
+* **V**		-- (work in progress: status - compiled module)
+
+## install
+
+* node.js
+
+```
+npm install -s session_tokens
+```
+
+* rust 
+
+TBD
+
+* C++
+
+TBD
+
+* V
+
+TBD
+
+
+## usage
+
+**JavaScript** / **TypeScript**
+> * node.js
+>
+```
+const sess_toks = require('session_token').defaults
+```
+>
+>* ts 
+>
+```
+import {defaults} from 'session_tokens' as sess_toks
+```
+>
+
+
+
+
+
 
 ## Defaults
 
@@ -34,6 +76,17 @@ In particular, **tokens**, including **session** ids, will require specializatio
 
 * **Rust**
 
+A Token is either a transition token or a session token:
+
+```
+pub enum Token {
+    SessionToken(SessionToken),
+    TransitionToken(TransitionToken)
+}
+```
+
+In Rust, a Token is returned from a Box'ed function, with an **Option**al prefix string as a parameter.
+
 ```
 #[allow(non_camel_case_types)]
 type token_lambda = Box<fn (Option<&str>) -> Token>;
@@ -48,8 +101,21 @@ type token_lambda = Box<fn (Option<&str>) -> Token>;
 
 * **C++**
 
+The **Token** is treated as class inheritting from std::string.
+
 ```
-typedef  Token * (* token_lambda)(optional<string>&);
+class Token : public string {
+public:
+    Token() : string() {}
+    Token(string val) : string(val) { }
+};
+
+```
+
+Now, the `token_lambda` type is defined as returning a **Token** pointer.
+
+```
+typedef Token * (*token_lambda)(string);
 ```
 
 * **TypeScript**
@@ -58,7 +124,7 @@ typedef  Token * (* token_lambda)(optional<string>&);
 type token_lambda = ( prefix? : string ) => Token;
 ```
 
-* **JavaScript
+* **JavaScript**
 
 ```
 const default_token_maker = (prefix) => {

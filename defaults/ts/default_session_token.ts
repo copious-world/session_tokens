@@ -238,7 +238,7 @@ interface LocalSessionTokensAbstract {
  *
  */
 
-class LocalSessionTokens implements LocalSessionTokensAbstract {
+export class LocalSessionTokens implements LocalSessionTokensAbstract {
 
     _db : DB;
     //
@@ -259,9 +259,9 @@ class LocalSessionTokens implements LocalSessionTokensAbstract {
     _token_timing : Map<TransitionToken,TokenTimingInfo>;
     _session_timing : Map<SessionToken,SessionTimingInfo>;
     //
-    _session_time_chopper : Number;         // all timers chopped down at interval completion.
-    _general_session_timeout : Number;      // override module constant or it is initialized to module constant
-    _general_token_timeout : Number;        // override module constant or it is initialized to module constant
+    _session_time_chopper : number;         // all timers chopped down at interval completion.
+    _general_session_timeout : number;      // override module constant or it is initialized to module constant
+    _general_token_timeout : number;        // override module constant or it is initialized to module constant
     //
     _token_creator : token_lambda;          // producer function should be passed in from configuration
 
@@ -292,8 +292,16 @@ class LocalSessionTokens implements LocalSessionTokensAbstract {
         this._token_creator = token_creator ? token_creator : default_token_maker
         //
         this._general_session_timeout = GENERAL_DEFAULT_SESSION_TIMEOUT
-        this._session_time_chopper = setInterval(this.decrement_timers,SESSION_CHOP_INTERVAL)
+        this._session_time_chopper = setInterval(() => (this.decrement_timers()), SESSION_CHOP_INTERVAL);
         this._general_token_timeout = Infinity
+    }
+
+
+    /**
+     * 
+     */
+    shutdown() {
+        if ( this._session_time_chopper ) clearInterval(this._session_time_chopper)
     }
 
     /**
@@ -965,36 +973,3 @@ class LocalSessionTokens implements LocalSessionTokensAbstract {
 
 }
 
-
-
-class lilDB implements DB {
-
-    set_session_key_value : (session_token : SessionToken, ownership_key : Ucwid) => Hash;
-    del_session_key_value : (session_token : SessionToken) => Promise<boolean>;
-    set_key_value : (t_token : TransitionToken, value :string) => void;
-    get_key_value : (t_token : TransitionToken) => Promise<string | boolean>;
-    del_key_value : (t_token : TransitionToken) => void;
-    check_hash  :   (hh_unidentified : string, ownership_key : Ucwid) => Promise<boolean>;
-
-    constructor(spec) {
-        let self = this
-        for ( let [fn,lambda] of Object.entries(spec) ) {
-            self[fn] = lambda
-        }
-    }
-
-}
-
-
-
-let db = new lilDB({
-    set_session_key_value : (session_token : SessionToken, ownership_key : Ucwid) => { "" },
-    del_session_key_value : async (session_token : SessionToken) =>  { return true },
-    set_key_value : (t_token : TransitionToken, value :string) => {},
-    get_key_value : (t_token : TransitionToken) => { false },
-    del_key_value : (t_token : TransitionToken) => {},
-    check_hash  :   async (hh_unidentified : string, ownership_key : Ucwid) => { true }
-})
-
-
-new LocalSessionTokens(db,default_token_maker)

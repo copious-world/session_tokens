@@ -1,7 +1,7 @@
 #include <algorithm>
 #include <functional>
 #include <iostream>
-#include <experimental/optional>
+#include <optional>
 #include <string>
 #include <map>
 #include <set>
@@ -13,13 +13,12 @@
 #include <climits>
 
 using namespace std;
-using namespace std::experimental;
 
 // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
 
-typedef string Hash;s
-typedef string Ucwid;
+typedef string  Hash;
+typedef string  Ucwid;
 
 const char * SESSION_PEFIX = "user+";
 
@@ -45,11 +44,10 @@ public:
 };
 
 
-template<typename T>
-typedef variant<T, string> StructOrString;
+template <typename T>
+using StructOrString = typename variant<T>::StructOrString;
 
-
-typedef  Token * (* token_lambda)(optional<string>&);
+typedef Token * (*token_lambda)(string);
 
 class SessionTokenTraits {
 public:
@@ -113,11 +111,11 @@ inline string uuid() {
 }
 
 
-Token *default_token_maker(optional<string> & prefix) {
+Token *default_token_maker(string & prefix) {
     string rstr = uuid();
     //
-    if ( prefix ) {
-        const string prfx = *prefix;  // value
+    if ( prefix.size() ) {
+        const string prfx(prefix);  // value
         if (prfx == SESSION_PEFIX) {
             SessionToken *st = new SessionToken(prfx + rstr);
             return st;
@@ -194,15 +192,15 @@ public:
 // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
 template<class T>
-class LocalSessionTokens : public TokenTables {
+class LocalSessionTokens : public TokenTables<T> {
 
     typedef T Jsonable;
     //
 public:
 
-    LocalSessionTokens(DB &db,optional<token_lambda>& token_creator) : TokenTables(db,token_creator) {
+    LocalSessionTokens(DB &db,optional<token_lambda>& token_creator) : TokenTables<T>(db,token_creator) {
     }
-    virtual ~TokenTables() {}
+    virtual ~LocalSessionTokens() {}
 
 public:
 
@@ -212,7 +210,7 @@ public:
     map<TransitionToken,SessionToken>       _token_to_session;
     map<SessionToken,string>                _session_checking_tokens;
     map<TransitionToken,string>             _token_to_information;
-    maps<SessionToken,SessionTokenManager>  _sessions_to_their_tokens;
+    map<SessionToken,SessionTokenManager>   _sessions_to_their_tokens;
 
 public:
 
@@ -224,14 +222,15 @@ public:
         //
         string tval;
         if ( holds_alternative<string>(value) ) {
-            tval = get<string>(v);
+            tval = get<string>(value);
         } else {
-            T *j = get<Jsonable>(v);
+            T *j = get<Jsonable>(value);
             tval = j.serialize();
         }
         //
-        if ( _db ) _db->set_key_value(token,tval);
-        _token_to_information[token] = tval;
+        DB *db = this->_db;
+        if ( db ) db->set_key_value(t_token,tval);
+        _token_to_information[t_token] = tval;
     }
 
     //
@@ -240,9 +239,10 @@ public:
             string value = search->second;
             return value;
         } else {
-            optional<string> dbval = _db ? _db->get_key_value(token) : {};
+            DB *db = this->_db;
+            optional<string> dbval = db ? db->get_key_value(t_token) : nullopt;
             if ( dbval ) {
-                string value = *dbval
+                string value = *dbval;
                 this->add_token(t_token,value);
                 return value;
             } else {
@@ -259,7 +259,8 @@ public:
                 SessionTokenManager &stm_ref = set_tok_ref->second;
                 stm_ref.clear();
             }
-            if ( _db ) _db->del_key_value(t_token);
+            DB *db = this->_db;
+            if ( db ) db->del_key_value(t_token);
             if ( auto osearch = _token_to_owner.find(t_token); osearch != _token_to_owner.end() ) {
                 _token_to_owner.erase(osearch);
             }
@@ -281,8 +282,9 @@ public:
 
     //
     virtual void add_session(SessionToken & session_token, Ucwid & ownership_key, optional<TransitionToken>  & o_t_token) {
-        if ( _db ) {
-            Hash hash_of_p2 =_db->set_session_key_value(session_token,ownership_key);
+        DB *db = this->_db;
+        if ( db ) {
+            Hash hash_of_p2 =db->set_session_key_value(session_token,ownership_key);
             _session_to_owner[session_token] = ownership_key;
             _session_checking_tokens[session_token] = hash_of_p2;
             _token_to_owner[session_token] = ownership_key;
@@ -299,19 +301,20 @@ public:
 
 
     virtual optional<bool> active_session(SessionToken & session_token, Ucwid & ownership_key) {
-        if ( auto sct_search = _session_checking_tokens.find(t_token); sct_search != _session_checking_tokens.end() ) {
+        if ( auto sct_search = _session_checking_tokens.find(session_token); sct_search != _session_checking_tokens.end() ) {
             string hh_unidentified = *sct_search;
-            bool truth = _db->check_hash(hh_str,ownership_key)
+            DB *db = this->_db;
+            bool truth = db ? db->check_hash(hh_unidentified,ownership_key) : false;
             return truth;
         }
-        return {}
+        return {};
     }
 
     virtual void destroy_session(TransitionToken & t_token) {
 
         if ( auto sess_search = _token_to_session.find(t_token); sess_search != _token_to_session.end() ) {
             SessionToken session_token = *sess_search;
-            if ( auto o_search = _session_to_owner.find(t_token); o_search != session_to_owner.end() ) {
+            if ( auto o_search = _session_to_owner.find(t_token); o_search != _session_to_owner.end() ) {
                 _session_to_owner.erase(o_search);
             }
             if ( auto sct_search = _session_checking_tokens.find(t_token); sct_search != _session_checking_tokens.end() ) {
@@ -324,13 +327,14 @@ public:
                 SessionTokenManager &stm_ref = set_tok_ref->second;
                 stm_ref.clear();
             }
-            if( _db ) _db->del_session_key_value(session_token);
+            DB *db = this->_db;
+            if( db ) db->del_session_key_value(session_token);
         }
     }
 
     virtual void add_transferable_token(TransitionToken & t_token, StructOrString<Jsonable> value, Ucwid & ownership_key) {
         //
-        if ( auto sess_search = owner_to_session.find(ownership_key); sess_search != owner_to_session.end() ) {
+        if ( auto sess_search = _owner_to_session.find(ownership_key); sess_search != _owner_to_session.end() ) {
             SessionToken session_token = *sess_search;
             if ( auto set_tok_ref = _sessions_to_their_tokens.find(session_token); set_tok_ref != _sessions_to_their_tokens.end() ) {
                 SessionTokenManager &stm_ref = set_tok_ref->second;
@@ -343,13 +347,13 @@ public:
     }
 
     virtual void transfer_token(TransitionToken & t_token, Ucwid & yielder_key, Ucwid & receiver_key ) {
-        if ( auto sess_search = owner_to_session.find(yielder_key); sess_search != owner_to_session.end() ) {
+        if ( auto sess_search = _owner_to_session.find(yielder_key); sess_search != _owner_to_session.end() ) {
             SessionToken ysst = *sess_search;
             if ( auto set_tok_ref = _sessions_to_their_tokens.find(ysst); set_tok_ref != _sessions_to_their_tokens.end() ) {
                 SessionTokenManager &stm_ref = set_tok_ref->second;
                 if ( stm_ref.session_carries.contains(t_token) ) {
                     this->destroy_token(t_token);
-                    if ( auto rsess_search = owner_to_session.find(receiver_key); rsess_search != owner_to_session.end() ) {
+                    if ( auto rsess_search = _owner_to_session.find(receiver_key); rsess_search != _owner_to_session.end() ) {
                         SessionToken rsst = *rsess_search;
                         _token_to_session[t_token] = rsst;
                         if ( auto rset_tok_ref = _sessions_to_their_tokens.find(rsst); rset_tok_ref != _sessions_to_their_tokens.end() ) {
