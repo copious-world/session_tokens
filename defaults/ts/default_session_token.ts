@@ -1,9 +1,15 @@
 
 // tsc --target es2022 ts/default_session_token.ts
 import {uuid} from "./uuid"
+import {DB} from './iDB'
 /**
  * const { uuid } = require("./uuid");
  */ 
+
+const MINUTES = (1000*60)
+const GENERAL_DEFAULT_SESSION_TIMEOUT = 60*MINUTES
+const SESSION_CHOP_INTERVAL = 500;
+
 
 type Hash = string;
 type SessionToken = string;
@@ -18,37 +24,6 @@ type Token = TransitionToken | SessionToken;
  * @returns {Token} -- a unique identifier relative to the running application scope (defind by the application)
  */
 type token_lambda = ( prefix? : string ) => Token;
-
-const MINUTES = (1000*60)
-const GENERAL_DEFAULT_SESSION_TIMEOUT = 60*MINUTES
-const SESSION_CHOP_INTERVAL = 500;
-
-/**
- * DB interfaces are supplied in order to ensure that a session can last outside the 
- * lifetime of an executable, given that the excecutable may fail or that a session may be put on pause.
- * The DB interfaces also provides a formalism for sharing information between microservices.
- * 
- * The DB interface specifies methods that handle different kinds of database relationships.
- * It is expected that the session keys will be in kind, while general tokens will be in 
- * another kind, a key value database for instance. Optionally, it can be a different kind of implementation,
- * for a key value stored, but if the same as for sessions, it is expected to be another instance.
- * 
- * Different applications may have different key value databases. For instance, 
- * some may be global persistence databases, while some may be shared memory caches, like those
- * provided by global_session. But, even if they are the same, the session data base will store a hash of data
- * identifying the session, while the token database will store actual values; where, the values stored in the database
- * may be keys or serializations of share token data.
- */
-
-interface DB {
-    set_session_key_value : (session_token : SessionToken, ownership_key : Ucwid) => Hash;
-    del_session_key_value : (session_token : SessionToken) => Promise<boolean>;
-    set_key_value : (t_token : TransitionToken, value :string) => void;
-    get_key_value : (t_token : TransitionToken) => Promise<string | boolean>;
-    del_key_value : (t_token : TransitionToken) => void;
-    check_hash  :   (hh_unidentified : string, ownership_key : Ucwid) => Promise<boolean>;
-}
-
 
 
 /**
@@ -117,12 +92,12 @@ class SessionTimingInfo {
 
     _detachment_allowed : boolean;
     _is_detached : boolean;   // a session is detached when its owner has logged out but returning is allowed
-    _time_left : Number;
-    _time_left_after_detachment : Number;
-    _time_allotted : Number;
+    _time_left : number;
+    _time_left_after_detachment : number;
+    _time_allotted : number;
     _shared : boolean;
 
-    constructor(default_timeout : Number) {
+    constructor(default_timeout : number) {
         this._detachment_allowed = false;
         this._is_detached = false;
         this._time_left = default_timeout;
@@ -152,9 +127,9 @@ class TokenTimingInfo {
 
     _detachment_allowed : boolean;
     _is_detached : boolean;
-    _time_left : Number;
-    _time_left_after_detachment : Number;
-    _time_allotted : Number;
+    _time_left : number;
+    _time_left_after_detachment : number;
+    _time_allotted : number;
 
     constructor() {
         this._detachment_allowed = false;
@@ -179,7 +154,7 @@ class TokenTimingInfo {
  * Maintaining an abstract interface if only to establish a gazetter into the methods and 
  * provide interface structures for translations to other languages using, e.g., traits, abstract classes, etc.
  */
-interface LocalSessionTokensAbstract {
+export interface TokenTablesAbstract {
     decrement_timers : () => void
     set_token_creator : (token_creator: token_lambda | undefined) => void
     //
@@ -201,16 +176,16 @@ interface LocalSessionTokensAbstract {
     transfer_token : ( t_token : TransitionToken, yielder_key : Ucwid,  receiver_key : Ucwid ) => void
     destroy_token : (t_token : TransitionToken) => void
     //
-    set_general_session_timeout : (timeout : Number) => void
-    set_session_timeout : (session_token : SessionToken,timeout : Number) => void
-    get_session_timeout : (session_token : SessionToken) => Number | undefined
-    get_session_time_left : (session_token : SessionToken) => Number | undefined
+    set_general_session_timeout : (timeout : number) => void
+    set_session_timeout : (session_token : SessionToken,timeout : number) => void
+    get_session_timeout : (session_token : SessionToken) => number | undefined
+    get_session_time_left : (session_token : SessionToken) => number | undefined
     //
-    set_general_token_timeout : (timeout : Number) => void
-    set_disownment_token_timeout : (t_token : TransitionToken,timeout : Number) => void
-    set_token_timeout : (t_token : TransitionToken,timeout : Number) => void
-    get_token_timeout : (t_token : TransitionToken)  =>  Number | undefined 
-    get_token_time_left(t_token : TransitionToken) : Number | undefined
+    set_general_token_timeout : (timeout : number) => void
+    set_disownment_token_timeout : (t_token : TransitionToken,timeout : number) => void
+    set_token_timeout : (t_token : TransitionToken,timeout : number) => void
+    get_token_timeout : (t_token : TransitionToken)  =>  number | undefined 
+    get_token_time_left(t_token : TransitionToken) : number | undefined
     set_token_sellable : (t_token : TransitionToken, amount? : Number) => void
     unset_token_sellable : (t_token : TransitionToken) => void
     //
@@ -238,7 +213,7 @@ interface LocalSessionTokensAbstract {
  *
  */
 
-export class LocalSessionTokens implements LocalSessionTokensAbstract {
+export class TokenTables implements TokenTablesAbstract {
 
     _db : DB;
     //
@@ -690,7 +665,7 @@ export class LocalSessionTokens implements LocalSessionTokensAbstract {
      * 
      * @param timeout 
      */
-    set_general_session_timeout(timeout : Number) : void  {
+    set_general_session_timeout(timeout : number) : void  {
         this._general_session_timeout = timeout
     }
 
@@ -700,7 +675,7 @@ export class LocalSessionTokens implements LocalSessionTokensAbstract {
      * @param session_token 
      * @param timeout 
      */
-    set_session_timeout(session_token : SessionToken,timeout : Number) : void {
+    set_session_timeout(session_token : SessionToken,timeout : number) : void {
         let s_time_info = this._session_timing.get(session_token)
         if ( s_time_info !== undefined ) {
             s_time_info._time_allotted = timeout
@@ -718,7 +693,7 @@ export class LocalSessionTokens implements LocalSessionTokensAbstract {
      * @param session_token 
      * @returns 
      */
-    get_session_timeout(session_token : SessionToken) : Number | undefined {
+    get_session_timeout(session_token : SessionToken) : number | undefined {
         let s_time_info = this._session_timing.get(session_token)
         if ( s_time_info !== undefined ) {
             return s_time_info._time_allotted
@@ -732,7 +707,7 @@ export class LocalSessionTokens implements LocalSessionTokensAbstract {
      * @param session_token 
      * @returns 
      */
-    get_session_time_left(session_token : SessionToken) : Number | undefined {
+    get_session_time_left(session_token : SessionToken) : number | undefined {
         let s_time_info = this._session_timing.get(session_token)
         if ( s_time_info !== undefined ) {
             return s_time_info._time_left
@@ -791,7 +766,7 @@ export class LocalSessionTokens implements LocalSessionTokensAbstract {
      * 
      * @param timeout 
      */
-    set_general_token_timeout(timeout : Number) : void {
+    set_general_token_timeout(timeout : number) : void {
         this._general_token_timeout = timeout
     }
 
@@ -800,7 +775,7 @@ export class LocalSessionTokens implements LocalSessionTokensAbstract {
      * @param t_token 
      * @param timeout 
      */
-    set_disownment_token_timeout(t_token : TransitionToken,timeout : Number) : void {
+    set_disownment_token_timeout(t_token : TransitionToken,timeout : number) : void {
         let time_info = this._token_timing.get(t_token)
         if ( time_info !== undefined && time_info._detachment_allowed ) {
             time_info._time_left_after_detachment = timeout
@@ -812,7 +787,7 @@ export class LocalSessionTokens implements LocalSessionTokensAbstract {
      * @param t_token 
      * @param timeout 
      */
-    set_token_timeout(t_token : TransitionToken,timeout : Number) : void {
+    set_token_timeout(t_token : TransitionToken,timeout : number) : void {
         let time_info = this._token_timing.get(t_token)
         if ( time_info !== undefined ) {
             time_info._time_allotted = timeout
@@ -825,7 +800,7 @@ export class LocalSessionTokens implements LocalSessionTokensAbstract {
      * @param t_token 
      * @returns 
      */
-    get_token_timeout(t_token : TransitionToken) : Number | undefined {
+    get_token_timeout(t_token : TransitionToken) : number | undefined {
         let time_info = this._token_timing.get(t_token)
         if ( time_info !== undefined ) {
             return time_info._time_allotted
@@ -838,7 +813,7 @@ export class LocalSessionTokens implements LocalSessionTokensAbstract {
      * @param t_token 
      * @returns 
      */
-    get_token_time_left(t_token : TransitionToken) : Number | undefined {
+    get_token_time_left(t_token : TransitionToken) : number | undefined {
         let time_info = this._token_timing.get(t_token)
         if ( time_info !== undefined ) {
             return time_info._time_left

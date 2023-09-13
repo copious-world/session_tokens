@@ -69,7 +69,7 @@ pub trait DB<'a>: Sync + Send {
     fn set_key_value(&self, token : & TransitionToken, value : &str )  -> ();
     async fn get_key_value(&self, token : & TransitionToken )  -> Option<&str>;
     fn del_key_value(&self, token : & TransitionToken )  -> ();
-    async fn check_hash(&self, hh_unidentified : &str, ownership_key : Ucwid )  -> bool;
+    async fn check_hash(&self, hh_unidentified : &str, ownership_key : &Ucwid )  -> bool;
 }
 
 #[async_trait]
@@ -121,7 +121,6 @@ pub trait TokenTables<'a, D: DB<'a>> {
     fn list_sellable_tokens(&mut self) -> Vec<TransitionToken>;
     fn list_unassigned_tokens(&mut self) -> Vec<TransitionToken>;
     fn list_detached_sessions(&mut self) -> Vec<SessionToken>;
-
 }
 
 
@@ -315,6 +314,8 @@ struct LocalSessionTokens< D: for<'a> DB<'a> + std::marker::Unpin > {
 }
 
 
+// return_
+// helper function that clears out some trouble with ownership
 
 fn return_<S,T> (_t_to_thing : & HashMap::<S,T>,  tok : &S) -> Option<T> where S: Eq, S: std::hash::Hash, T: Clone {
     match _t_to_thing.get(tok) {
@@ -499,7 +500,7 @@ impl<D: for<'a> DB<'a> + std::marker::Unpin> TokenTables<'_, D> for LocalSession
         match self._session_checking_tokens.get(session_token) {
             Some(hh_unidentified) => {
                 let hh_str : & str = hh_unidentified.as_str();
-                let truth = self._db.check_hash(hh_str,ownership_key.to_string()).await; // await
+                let truth = self._db.check_hash(hh_str,ownership_key).await; // await
                 Some(truth)
             }
             _ => Some(false)

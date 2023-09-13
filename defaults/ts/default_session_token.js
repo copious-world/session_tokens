@@ -1,5 +1,8 @@
 // tsc --target es2022 ts/default_session_token.ts
 import { uuid } from "./uuid";
+/**
+ * const { uuid } = require("./uuid");
+ */
 const MINUTES = (1000 * 60);
 const GENERAL_DEFAULT_SESSION_TIMEOUT = 60 * MINUTES;
 const SESSION_CHOP_INTERVAL = 500;
@@ -114,7 +117,7 @@ class TokenTimingInfo {
 * Tokens can be given by a proactive seller/giver in order to hand off state transitions to a seconday micro service
 *
 */
-class LocalSessionTokens {
+export class TokenTables {
     _db;
     //
     _session_to_owner; // bidirectional => tokens <-> owner
@@ -165,8 +168,15 @@ class LocalSessionTokens {
         this._token_creator = token_creator ? token_creator : default_token_maker;
         //
         this._general_session_timeout = GENERAL_DEFAULT_SESSION_TIMEOUT;
-        this._session_time_chopper = setInterval(this.decrement_timers, SESSION_CHOP_INTERVAL);
+        this._session_time_chopper = setInterval(() => (this.decrement_timers()), SESSION_CHOP_INTERVAL);
         this._general_token_timeout = Infinity;
+    }
+    /**
+     *
+     */
+    shutdown() {
+        if (this._session_time_chopper)
+            clearInterval(this._session_time_chopper);
     }
     /**
      *
@@ -405,19 +415,16 @@ class LocalSessionTokens {
                 sess_token_set.session_carries.add(t_token);
                 //
                 let t_info = new TransferableTokenInfo(ownership_key);
-                let store_value = "";
                 if (typeof value === 'string') {
-                    store_value = value;
                     let o_value = JSON.parse(value);
                     o_value._owner = ownership_key; // just in case
                     value = o_value;
                 }
-                else {
-                    store_value = JSON.stringify(value);
-                }
                 t_info.set_all(value);
+                //
                 this._all_tranferable_tokens.set(t_token, t_info); // if it is in this set, it is transferable
                 //
+                let store_value = JSON.stringify(value);
                 await this.add_token(t_token, store_value); // add to token_timing, token_to_info, and db
             }
         }
@@ -792,28 +799,3 @@ class LocalSessionTokens {
         return Array.from(this._detached_sessions);
     }
 }
-class lilDB {
-    set_session_key_value;
-    del_session_key_value;
-    set_key_value;
-    get_key_value;
-    del_key_value;
-    check_hash;
-    constructor(spec) {
-        let self = this;
-        for (let [fn, lambda] of Object.entries(spec)) {
-            self[fn] = lambda;
-        }
-    }
-}
-let db = new lilDB({
-    set_session_key_value: (session_token, ownership_key) => {
-        "";
-    },
-    del_session_key_value: async (session_token) => { return true; },
-    set_key_value: (t_token, value) => { },
-    get_key_value: (t_token) => { false; },
-    del_key_value: (t_token) => { },
-    check_hash: async (hh_unidentified, ownership_key) => { true; }
-});
-new LocalSessionTokens(db, default_token_maker);

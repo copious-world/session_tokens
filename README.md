@@ -38,7 +38,7 @@ TBD
 ## usage
 
 **JavaScript** / **TypeScript**
-> * node.js
+>node.js
 >
 ```
 const sess_toks = require('session_token').defaults
@@ -115,7 +115,7 @@ public:
 Now, the `token_lambda` type is defined as returning a **Token** pointer.
 
 ```
-typedef Token * (*token_lambda)(string);
+typedef Token(*token_lambda)(string);
 ```
 
 * **TypeScript**
@@ -134,7 +134,7 @@ const default_token_maker = (prefix) => {
 }
 ```
 
-## Asynchrnocity
+## Asynchronocity
 
 Where possible, callouts to the DB modules may be handled ansynchronously. Languages provide ways of indicating that a particular stack may wait until there is a response, allowing other operations to take place in the interim. 
 
@@ -209,5 +209,118 @@ Here are some of the methods that may be invoked to manage token lifetimes:
 When a session ends, transfereable tokens still in its tables will be assigned to a no-entity owner for some period of time. When conditions are right for the token transfer to complete, the server may the effect the transfer.
 
 
+## Database Interface
+
+DB interfaces are supplied in order to ensure that a session can last outside the 
+lifetime of an executable, given that the excecutable may fail or that a session may be put on pause.
+The DB interfaces also provides a formalism for sharing information between microservices.
+
+>Applications using the TokenTables traits (interface) will need to supply a DB object that provide the traits (interface) DB methods set out in the interface definition below.
+
+The DB interface specifies methods that handle different kinds of database relationships.
+It is expected that the session keys will be in kind, while general tokens will be in 
+another kind, a key value database for instance. Optionally, it can be a different kind of implementation,
+for a key value stored, but if the same as for sessions, it is expected to be another instance.
+
+Different applications may have different key value databases. For instance, 
+some may be global persistence databases, while some may be shared memory caches, like those
+provided by global_session. But, even if they are the same, the session data base will store a hash of data
+identifying the session, while the token database will store actual values; where, the values stored in the database
+may be keys or serializations of share token data.
+
+Here is the **TypeScript** definition:
+
+```
+type Hash = string;
+type SessionToken = string;
+type TransitionToken = string
+type Ucwid = string
+
+export interface DB {
+    set_session_key_value : (session_token : SessionToken, ownership_key : Ucwid) => Hash;
+    del_session_key_value : (session_token : SessionToken) => Promise<boolean>;
+    set_key_value : (t_token : TransitionToken, value :string) => void;
+    get_key_value : (t_token : TransitionToken) => Promise<string | boolean>;
+    del_key_value : (t_token : TransitionToken) => void;
+    check_hash  :   (hh_unidentified : string, ownership_key : Ucwid) => Promise<boolean>;
+}
+
+```
 
 
+Here it is again in **Rust**. It is clearer as to which methods require async handling.
+
+```
+#[async_trait]
+pub trait DB<'a>: Sync + Send {
+    async fn set_session_key_value(&self, session_token : & SessionToken, ownership_key : Ucwid ) -> Hash;
+    fn del_session_key_value(&self, session_token : & SessionToken ) -> bool;
+    fn set_key_value(&self, token : & TransitionToken, value : &str )  -> ();
+    async fn get_key_value(&self, token : & TransitionToken )  -> Option<&str>;
+    fn del_key_value(&self, token : & TransitionToken )  -> ();
+    async fn check_hash(&self, hh_unidentified : &str, ownership_key : Ucwid )  -> bool;
+}
+
+```
+
+
+
+## TokenTables Methods
+
+
+Here is the Rust **TokenTables** trait.
+
+
+```
+#[async_trait]
+pub trait TokenTables<'a, D: DB<'a>> {
+    type Jsonable;
+    //
+    fn new(db : D, token_creator : Option<token_lambda>) -> Self;
+    //
+    fn decrement_timers(&mut self) -> ();
+    fn set_token_creator(&mut self, token_creator : Option<token_lambda>) -> ();
+    //
+    async fn add_session(&mut self, session_token : & SessionToken, ownership_key : & Ucwid, o_t_token : Option<TransitionToken>, shared : Option<bool> ) -> Option<Hash>;
+    async fn active_session(&self, session_token : & SessionToken, ownership_key : & Ucwid) -> Option<bool>;
+    fn destroy_session(&mut self, token : & TransitionToken) -> ();
+    fn allow_session_detach(&mut self, session_token : SessionToken) -> ();
+    fn detach_session(&mut self, session_token : SessionToken) -> ();
+    fn attach_session(&mut self, session_token : SessionToken) -> ();
+    //
+    fn create_token(&self, prefix : Option<String> ) -> Token;          // await
+    fn add_token(&mut self, token : &TransitionToken, value : StructOrString<Self::Jsonable> ) -> ();
+    async fn transition_token_is_active(&mut self, token : & TransitionToken) -> Option<String>;        // await
+    fn from_token(&self, token : TransitionToken) -> Ucwid;
+    fn add_transferable_token(&mut self,  t_token : & TransitionToken, value : StructOrString<Self::Jsonable>, ownership_key : & Ucwid ) -> ();
+    fn add_session_bounded_token(&mut self,  t_token : & TransitionToken, value : StructOrString<Self::Jsonable>, ownership_key : & Ucwid )  -> ();  // => Promise<void>
+    async fn acquire_token(&mut self, t_token : & TransitionToken, session_token : & SessionToken, owner : & Ucwid) -> bool;    // => Promise<boolean>
+    fn token_is_transferable(&self,  t_token : &TransitionToken) -> bool;
+    //
+    async fn transfer_token(&mut self,  t_token : & TransitionToken, yielder_key : & Ucwid,  receiver_key : & Ucwid )  -> ();
+    fn destroy_token(&mut self, token : & TransitionToken) -> ();
+
+    //
+    fn set_general_session_timeout(&mut self, timeout : i32) -> ();
+    fn set_session_timeout(&mut self, session_token : & SessionToken, timeout : i32) -> ();
+    fn get_session_timeout(&mut self, session_token : & SessionToken) -> Option<i32>;
+    fn get_session_time_left(&mut self, session_token : & SessionToken) -> Option<i32>;
+    //
+    fn set_general_token_timeout(&mut self, timeout : i32) -> ();
+    fn set_disownment_token_timeout(&mut self, t_token : & TransitionToken, timeout : i32) -> ();
+    fn set_token_timeout(&mut self, t_token : & TransitionToken,timeout : i32) -> ();
+    fn get_token_timeout(&mut self, t_token : & TransitionToken) -> Option<i32>;
+    fn get_token_time_left(&mut self, t_token : & TransitionToken)  ->  Option<i32>;
+    fn set_token_sellable(&mut self, t_token : & TransitionToken, amount : Option<f32>) -> ();
+    fn unset_token_sellable(&mut self, t_token : & TransitionToken) -> ();
+    //
+    async fn reload_session_info(&mut self, session_token : & SessionToken, ownership_key : & Ucwid, hash_of_p2 : Hash) -> bool; // Promise<boolean> 
+    async fn reload_token_info(&mut self, t_token : & TransitionToken) -> ();    // : Promise<void>
+    //
+    fn list_tranferable_tokens(&mut self, session_token : & SessionToken) -> Vec<TransitionToken>;
+    fn list_sellable_tokens(&mut self) -> Vec<TransitionToken>;
+    fn list_unassigned_tokens(&mut self) -> Vec<TransitionToken>;
+    fn list_detached_sessions(&mut self) -> Vec<SessionToken>;
+}
+
+```

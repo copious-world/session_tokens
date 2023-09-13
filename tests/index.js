@@ -1,5 +1,5 @@
 //
-const SessToken = require('../index').defaults
+const SessTable = require('../index').optimal
 
 class lilDB {
     set_session_key_value;
@@ -27,8 +27,9 @@ let db = new lilDB({
 });
 
 
+
 async function test() {
-    let stoks = new SessToken(db);
+    let stoks = new SessTable(db);
 
     stoks.shutdown()
 }
