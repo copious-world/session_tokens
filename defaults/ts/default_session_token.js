@@ -331,7 +331,7 @@ export class TokenTables {
     }
     // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
     /**
-     *  Calls upon the instance lambda in order to create a token for whatever use is intended.
+     * Calls upon the instance lambda in order to create a token for whatever use is intended.
      * @param {string} [prefix] - optionally put prefix the token whith an applicatino specfic string
      * @returns {token} -- a unique identifier relative to the running application scope (defind by the application)
      */

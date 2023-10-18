@@ -1,7 +1,7 @@
 // tsc --target es2022 ts/default_session_token.ts
 // import { uuid } from "./uuid";
 const { uuid } = require("./uuid");
- 
+
 const MINUTES = (1000 * 60);
 const GENERAL_DEFAULT_SESSION_TIMEOUT = 60 * MINUTES;
 const SESSION_CHOP_INTERVAL = 500;
@@ -90,12 +90,18 @@ class TokenTimingInfo {
     _time_left;
     _time_left_after_detachment;
     _time_allotted;
-    constructor() {
+    constructor(default_timeout) {
         this._detachment_allowed = false;
         this._is_detached = false;
-        this._time_left = 0;
-        this._time_left_after_detachment = 0;
-        this._time_allotted = 0;
+        if ( isNaN(default_timeout) ) {
+            this._time_left = 0;
+            this._time_left_after_detachment = 0;
+            this._time_allotted = 0;    
+        } else {
+            this._time_left = default_timeout;
+            this._time_left_after_detachment = 0;
+            this._time_allotted = default_timeout;    
+        }
     }
     set_all(stored_info) {
         let self = this;
@@ -245,7 +251,7 @@ class TokenTables {
      * @param {Ucwid} ownership_key -- a string representation of an ownership ID such as a DID.
      * @param {TransitionToken} t_token -- a key into the token tables from which the session should be recoverable.
      * @param {bool} [shared] - if supplied, then information about the session will be stored in a shared DB
-     * @returns {Promise<Hash | undefined> } If the share parameter is used, then this willbe a key for checking the activity of the session.
+     * @returns {Promise<Hash | undefined> } If the share parameter is used, then this will be a key for checking the activity of the session.
      */
     async add_session(session_token, ownership_key, t_token, shared) {
         // hash_of_p2  hash of the second parameter per the hasher provided by the caching module
@@ -254,6 +260,7 @@ class TokenTables {
         // later the session_token will be passed into get_session_key_value where it will be hashed into an augmented has token
         // for fetching hash_of_p2
         this._session_to_owner.set(session_token, ownership_key); // the session transition token
+        this._owner_to_session.set(ownership_key,session_token)
         this._session_checking_tokens.set(session_token, hash_of_p2);
         this._token_to_owner.set(session_token, ownership_key);
         //
@@ -312,16 +319,17 @@ class TokenTables {
                 //
                 let token_sets = this._sessions_to_their_tokens.get(session_token);
                 if (token_sets !== undefined) {
-                    for (let token in token_sets.session_carries) {
+                    for (let token of token_sets.session_carries) {
                         this._orphaned_tokens.add(token); // orphaned
                     }
-                    for (let token in token_sets.session_bounded) {
+                    for (let token of token_sets.session_bounded) {
                         this.destroy_token(token);
                     }
                 }
                 this._sessions_to_their_tokens.delete(session_token);
                 //
                 this._db.del_session_key_value(session_token);
+                this._token_to_owner.delete(session_token)
             }
             catch (e) {
                 //
@@ -346,6 +354,9 @@ class TokenTables {
     }
     /**
      * Given a transition token, adds it to the local tables plus the key value database.
+     * Only maps the token to its information (value) and to its timing status.
+     * Ownership and transferability is handled by calling methods.
+     * 
      * @param {TransitionToken} token - a transition token which be part of a transition object.
      * @param {string} value - any string value less than a pre-determined size that can be stored.
      */
@@ -356,7 +367,7 @@ class TokenTables {
         if ((value !== undefined) && (t_token !== undefined)) {
             await this._db.set_key_value(t_token, value);
             this._token_to_information.set(t_token, value);
-            this._token_timing.set(t_token, new TokenTimingInfo());
+            this._token_timing.set(t_token, new TokenTimingInfo(this._general_token_timeout < Infinity ? this._general_token_timeout : undefined));
         }
     }
     /**
@@ -425,6 +436,10 @@ class TokenTables {
                 //
                 let store_value = JSON.stringify(value);
                 await this.add_token(t_token, store_value); // add to token_timing, token_to_info, and db
+                let token_timing = this._token_timing.get(t_token)
+                if ( token_timing ) {
+                    token_timing._detachment_allowed = true
+                }
             }
         }
     }
@@ -441,8 +456,9 @@ class TokenTables {
             let sess_token_set = this._sessions_to_their_tokens.get(session_token);
             if (t_token && sess_token_set) {
                 this._token_to_session.set(t_token, session_token);
-                sess_token_set.session_bounded.add(t_token);
-                this._all_tranferable_tokens.set(t_token, new TransferableTokenInfo(ownership_key)); // if it is in this set, it is transferable
+                sess_token_set.session_bounded.add(t_token);  // the tokens this session (hence, owner) bounds (and owns)
+                this._token_to_owner.set(t_token,ownership_key)  // from the token (unique) to the owner
+                // it may be transfered... later this can be removed or used.
                 await this.add_token(t_token, value);
             }
         }
@@ -562,7 +578,7 @@ class TokenTables {
                 })();
             }
         }
-    }
+    }    
     /**
      *
      * @param session_token
@@ -659,7 +675,7 @@ class TokenTables {
             time_info._time_allotted = timeout;
             time_info._time_left = timeout;
         }
-    }
+    }    
     /**
      *
      * @param t_token
@@ -759,7 +775,7 @@ class TokenTables {
      * @param session_token
      * @returns
      */
-    list_tranferable_tokens(session_token) {
+    async list_tranferable_tokens(session_token) {
         let sess_info = this._session_timing.get(session_token);
         if ((sess_info !== undefined) && (sess_info._detachment_allowed)) {
             let sess_token_set = this._sessions_to_their_tokens.get(session_token);
@@ -773,7 +789,7 @@ class TokenTables {
      *
      * @returns
      */
-    list_sellable_tokens() {
+    async list_sellable_tokens() {
         let transferables = Array.from(Object.keys(this._all_tranferable_tokens));
         transferables = transferables.filter((tok_key) => {
             let t_inf = this._all_tranferable_tokens.get(tok_key);
@@ -787,17 +803,18 @@ class TokenTables {
      *
      * @returns
      */
-    list_unassigned_tokens() {
+    async list_unassigned_tokens() {
         return Array.from(this._orphaned_tokens);
     }
     /**
      *
      * @returns
      */
-    list_detached_sessions() {
+    async list_detached_sessions() {
         return Array.from(this._detached_sessions);
     }
 }
 
 
 module.exports = TokenTables
+

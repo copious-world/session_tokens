@@ -27,7 +27,7 @@ type token_lambda = ( prefix? : string ) => Token;
 
 
 /**
- * A default token producer is available for implementations that omit 
+ * A default token producer is available for implementations that omit
  * an application defined token producer
  */
 const default_token_maker: token_lambda = ( prefix? : string ) => {
@@ -44,6 +44,10 @@ const default_token_maker: token_lambda = ( prefix? : string ) => {
  * This object refers to two sets
  * 1. one that contains the tokens that must be destroyed when the session is destroyed.
  * 2. a second that contains the tokens that may be transfered to another session and owner.
+ * 
+ * Tokens belonging to sessions are usually used to manage a state machine's progress with regard to 
+ * actions taking place between a client and a service. These tokens might be passed between backend services (micor-services)
+ * that manage information in relation to a session established for some user.
  */
 class SessionTokenSets {
     session_bounded : Set<TransitionToken>
@@ -56,7 +60,7 @@ class SessionTokenSets {
 
 /**
  * Transferable tokens may be moved to another owner at any time a session owner allows it.
- * By virue of being in a set of transferable tokens, the token is tansferable. 
+ * By virue of being in a set of transferable tokens, the token is tansferable.
  * The token may additionally be sellable at some price, which may positive or negative.
  * Other useful properties may be added later that apply only to transferable tokens.
  */
@@ -84,7 +88,7 @@ class TransferableTokenInfo {
 
 /**
  * There are several situations in which a sesion may be used in a time-sensitive way.
- * This class puts them in a single record for storage in a sinlge local table. 
+ * This class puts them in a single record for storage in a sinlge local table.
  * Many times, a token's timing roles may be manipulated at once. Hence, keeping the token in a table for each case
  * will increase the algorithmic time a token's updates will require.
  */
@@ -119,7 +123,7 @@ class SessionTimingInfo {
 
 /**
  * There are several situations in which a token may be used in a time-sensitive way.
- * This class puts them in a single record for storage in a sinlge local table. 
+ * This class puts them in a single record for storage in a sinlge local table.
  * Many times, a token's timing roles may be manipulated at once. Hence, keeping the token in a table for each case
  * will increase the algorithmic time a token's updates will require.
  */
@@ -131,12 +135,18 @@ class TokenTimingInfo {
     _time_left_after_detachment : number;
     _time_allotted : number;
 
-    constructor() {
+    constructor(default_timeout : number | undefined) {
         this._detachment_allowed = false;
         this._is_detached = false;
-        this._time_left = 0;
-        this._time_left_after_detachment = 0;
-        this._time_allotted = 0;    
+        if ( isNaN(default_timeout) ) {
+            this._time_left = 0;
+            this._time_left_after_detachment = 0;
+            this._time_allotted = 0;    
+        } else {
+            this._time_left = default_timeout;
+            this._time_left_after_detachment = 0;
+            this._time_allotted = default_timeout;    
+        }
     }
 
     set_all(stored_info : Object) {
@@ -192,10 +202,10 @@ export interface TokenTablesAbstract {
     reload_session_info(session_token : SessionToken, ownership_key : Ucwid, hash_of_p2 : Hash) : Promise<boolean> 
     reload_token_info(t_token : TransitionToken) : Promise<void>
     //
-    list_tranferable_tokens : (session_token : SessionToken) => TransitionToken[]
-    list_sellable_tokens : () => TransitionToken[]
-    list_unassigned_tokens : () => TransitionToken[]
-    list_detached_sessions : () => SessionToken[]
+    list_tranferable_tokens : (session_token : SessionToken) =>  Promise<TransitionToken[]>
+    list_sellable_tokens : () =>  Promise<TransitionToken[]>
+    list_unassigned_tokens : () =>  Promise<TransitionToken[]>
+    list_detached_sessions : () =>  Promise<SessionToken[]>
 }
 
 
@@ -210,6 +220,10 @@ export interface TokenTablesAbstract {
  *
  * Tokens can be lent by a proactive lender for the lifetime of the owner session (requires reference count)
  * Tokens can be given by a proactive seller/giver in order to hand off state transitions to a seconday micro service
+ * 
+ * Note that session time and token timing are different. Usually, a token is bound by a session , i.e. if the session expires,
+ * then the token expires even if the token has more time alloted. But, a token might be transferable or its expiration may be
+ * defered to a process other than the authorization process.
  *
  */
 
@@ -336,39 +350,49 @@ export class TokenTables implements TokenTablesAbstract {
 
     /**
      * Given a session_token, adds it to the local tables plus the session database. Stores the database hash in maps indexed by
-     * the session_token and by the ownership_key.
+     * the session_token and by the ownership_key. Here, the database DB is a key-value
+     * database which provides services to the client micro-services. 
+     * 
+     * In any event, the session token is set in the DB as the key to the identification of the session owner. Micro service clients
+     * will be provided the session token and check for ownership identity before providing services.
+     * 
+     * The parameter `shared` is required in order to make the session timing information available to other processes that 
+     * share the session table. When the `shared` parameter is **true**, this method returns a value.
+     * 
      * *Recommendation*: if using the returned value, it should be kept safe and sent via a communication channel to cooperating micro services
      *
      * @param {SessionToken} session_token -- a token identifiying a session typically returned by a login process -- not a transition token
      * @param {Ucwid} ownership_key -- a string representation of an ownership ID such as a DID.
-     * @param {TransitionToken} t_token -- a key into the token tables from which the session should be recoverable.
+     * @param {TransitionToken} [t_token] -- a key into the token tables from which the session should be recoverable.
      * @param {bool} [shared] - if supplied, then information about the session will be stored in a shared DB
-     * @returns {Promise<Hash | undefined> } If the share parameter is used, then this willbe a key for checking the activity of the session.
+     * @returns {Promise<Hash | undefined> } If the share parameter is used, then this will be a key for checking the activity of the session.
      */
-    async add_session(session_token : SessionToken, ownership_key : Ucwid, t_token : TransitionToken, shared? : boolean ) : Promise<Hash | undefined> {
+    async add_session(session_token : SessionToken, ownership_key : Ucwid, t_token? : TransitionToken, shared? : boolean ) : Promise<Hash | undefined> {
         // hash_of_p2  hash of the second parameter per the hasher provided by the caching module
         // e.g.hh unidentified (an intermediate hash) in LRU manager of global_session
         let hash_of_p2 = await this._db.set_session_key_value(session_token,ownership_key)  // return hh unidentified == xxhash of value (value == ownership key)
-        // later the session_token will be passed into get_session_key_value where it will be hashed into an augmented has token
-        // for fetching hash_of_p2
+        // later the session_token will be passed into get_session_key_value where it will be hashed into an augmented hash token
+        // for fetching the ownership key
+        //
+        // local copies... 
         this._session_to_owner.set(session_token,ownership_key) // the session transition token
-        this._session_checking_tokens.set(session_token,hash_of_p2)
+        this._session_checking_tokens.set(session_token,hash_of_p2)  
         this._token_to_owner.set(session_token,ownership_key)
         //
-        let sess_token_set = new SessionTokenSets()
+        let sess_token_set = new SessionTokenSets()  // if this methods is called twice, the session token sets will be overwritten.
         this._sessions_to_their_tokens.set(session_token,sess_token_set);
         //
-        if ( t_token ) {
-            this._token_to_session.set(t_token, session_token)
-            sess_token_set.session_bounded.add(t_token)
-            this._token_to_owner.set(t_token,ownership_key)
-            await this.add_token(t_token, hash_of_p2)  
+        if ( t_token ) {  // in some cases a token (keyed to some activity of the authorization process) is available when the session is created.
+            this._token_to_session.set(t_token, session_token)  // also given token find session 
+            sess_token_set.session_bounded.add(t_token)         // assume bounded by session 
+            this._token_to_owner.set(t_token,ownership_key)     // given token find owner of session 
+            await this.add_token(t_token, hash_of_p2)           // all things to add tokens
         }
         //
         let sti : SessionTimingInfo = new SessionTimingInfo(this._general_session_timeout)
-        this._session_timing.set(session_token,sti)
+        this._session_timing.set(session_token,sti)             // local session timing (in auth service)
         //
-        if ( shared ) {
+        if ( shared ) {                                         // beyond the auth service.
             sti._shared = true
             let value = JSON.stringify(sti)
             await this._db.set_key_value(session_token,value)
@@ -415,16 +439,17 @@ export class TokenTables implements TokenTablesAbstract {
                 //
                 let token_sets : SessionTokenSets | undefined = this._sessions_to_their_tokens.get(session_token)
                 if ( token_sets !== undefined ) {
-                    for ( let token in token_sets.session_carries ) {
+                    for ( let token of token_sets.session_carries ) {
                         this._orphaned_tokens.add(token)            // orphaned
                     }
-                    for ( let token in token_sets.session_bounded ) {
+                    for ( let token of token_sets.session_bounded ) {
                         this.destroy_token(token)
                     }
                 }
                 this._sessions_to_their_tokens.delete(session_token);
                 //
                 this._db.del_session_key_value(session_token)
+                this._token_to_owner.delete(session_token)
            } catch (e) {
                //
            }
@@ -436,7 +461,7 @@ export class TokenTables implements TokenTablesAbstract {
 
 
     /**
-     *  Calls upon the instance lambda in order to create a token for whatever use is intended.
+     * Calls upon the instance lambda in order to create a token for whatever use is intended.
      * @param {string} [prefix] - optionally put prefix the token whith an applicatino specfic string
      * @returns {token} -- a unique identifier relative to the running application scope (defind by the application)
      */
@@ -446,7 +471,7 @@ export class TokenTables implements TokenTablesAbstract {
 
     /**
      * Provided if any lazy configuration requirement must set the token creator after construction
-     * @param token_creator 
+     * @param token_creator
      */
     set_token_creator(token_creator: token_lambda | undefined) {
         this._token_creator = token_creator ? token_creator : default_token_maker
@@ -465,7 +490,7 @@ export class TokenTables implements TokenTablesAbstract {
         if ( (value !== undefined) && (t_token !== undefined) ) {
             await this._db.set_key_value(t_token,value)
             this._token_to_information.set(t_token,value)
-            this._token_timing.set(t_token,new TokenTimingInfo())
+            this._token_timing.set(t_token, new TokenTimingInfo((this._general_token_timeout < Infinity) ? this._general_token_timeout : undefined));
         }
     }
 
@@ -537,6 +562,10 @@ export class TokenTables implements TokenTablesAbstract {
                 //
                 let store_value : string = JSON.stringify(value)
                 await this.add_token(t_token,store_value)   // add to token_timing, token_to_info, and db
+                let token_timing = this._token_timing.get(t_token)
+                if ( token_timing ) {
+                    token_timing._detachment_allowed = true
+                }
             }
         }
     }
@@ -544,6 +573,9 @@ export class TokenTables implements TokenTablesAbstract {
     /**
      * Given a session_token, adds it to the local tables plus the session database. Stores the database hash in maps indexed by
      * the session_token and by the ownership_key.
+     * 
+     * This method does not make the token transferable. 
+     * 
      * @param {TransitionToken} t_token -- a key into the token tables from which the session should be recoverable.
      * @param {SessionToken} session_token -- a token identifiying a session typically returned by a login process -- not a transition token
      * @param {Ucwid} ownership_key -- a string representation of an ownership ID such as a DID.
@@ -554,8 +586,8 @@ export class TokenTables implements TokenTablesAbstract {
             let sess_token_set = this._sessions_to_their_tokens.get(session_token);
             if ( t_token && sess_token_set ) {
                 this._token_to_session.set(t_token, session_token)
-                sess_token_set.session_bounded.add(t_token)
-                this._all_tranferable_tokens.set(t_token,new TransferableTokenInfo(ownership_key)) // if it is in this set, it is transferable
+                sess_token_set.session_bounded.add(t_token);  // the tokens this session (hence, owner) bounds (and owns)
+                this._token_to_owner.set(t_token,ownership_key)  // from the token (unique) to the owner
                 await this.add_token(t_token,value)
             }
         }
@@ -858,7 +890,7 @@ export class TokenTables implements TokenTablesAbstract {
      * information to create a command of it, thereby leaving the command of change to the creator of the token.
      * However, it is not an absolute, and it is recommended that the token sharing only occur between processes and processors 
      * that within a particular security realm.
-     * 
+     *
      * @param {SessionToken} session_token -- should identify an active token in the shared DB
      * @param {Ucwid} ownership_key -- owner of session token
      * @param {Hash} hash_of_p2 - must be supplied by deserializer or inviting process
@@ -890,7 +922,7 @@ export class TokenTables implements TokenTablesAbstract {
         let data = await this._db.get_key_value(t_token)
         if ( typeof data === 'string' ) {
             let stored_info = JSON.parse(data)
-            let t_info = new TokenTimingInfo()
+            let t_info = new TokenTimingInfo((this._general_token_timeout < Infinity) ? this._general_token_timeout : undefined)
             t_info.set_all(stored_info)
             this._token_timing.set(t_token,t_info)
         }
@@ -900,11 +932,11 @@ export class TokenTables implements TokenTablesAbstract {
     // ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
 
     /**
-     * 
+     * These list methods return promises in case a descendant prefers to use DB storage
      * @param session_token 
-     * @returns 
+     * @returns - a promise to deliver an array of TransitionToken
      */
-    list_tranferable_tokens(session_token : SessionToken) : TransitionToken[] {
+    async list_tranferable_tokens(session_token : SessionToken) : Promise<TransitionToken[]> {
         let sess_info = this._session_timing.get(session_token)
         if ( (sess_info !== undefined) && (sess_info._detachment_allowed) ) {
             let sess_token_set = this._sessions_to_their_tokens.get(session_token);
@@ -916,10 +948,10 @@ export class TokenTables implements TokenTablesAbstract {
     }
 
     /**
-     * 
-     * @returns 
+     * These list methods return promises in case a descendant prefers to use DB storage
+     * @returns  - a promise to deliver an array of TransitionToken
      */
-    list_sellable_tokens() : TransitionToken[] {
+    async list_sellable_tokens() : Promise<TransitionToken[]> {
         let transferables = Array.from(Object.keys(this._all_tranferable_tokens))
         transferables = transferables.filter((tok_key) => {
             let t_inf = this._all_tranferable_tokens.get(tok_key)
@@ -931,18 +963,18 @@ export class TokenTables implements TokenTablesAbstract {
     }
 
     /**
-     * 
-     * @returns 
+     * These list methods return promises in case a descendant prefers to use DB storage
+     * @returns  - a promise to deliver an array of TransitionToken
      */
-    list_unassigned_tokens() : TransitionToken[] {
+    async list_unassigned_tokens() : Promise<TransitionToken[]> {
         return Array.from(this._orphaned_tokens)
     }
 
     /**
-     * 
-     * @returns 
+     * These list methods return promises in case a descendant prefers to use DB storage
+     * @returns  - a promise to deliver an array of SessionToken
      */
-    list_detached_sessions() : SessionToken[] {
+    async list_detached_sessions() : Promise<SessionToken[]> {
         return Array.from(this._detached_sessions)
     }
 
