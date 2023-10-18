@@ -2,13 +2,14 @@
 const SessTable = require('../index').optimal
 
 
-
-
-
 let conf = {
     _key_values_test : false,
     set_session_key_value: (session_token, ownership_key) => {
-        return `hashof(${session_token}, ${ownership_key})`
+        let obj = {
+            "sess" : session_token,
+            "own" : ownership_key
+        }
+        return JSON.stringify(obj)
     },
     del_session_key_value: async (session_token) => { return true; },
     set_key_value: (t_token, value) => { 
@@ -17,13 +18,15 @@ let conf = {
         conf._key_values_test[t_token] = value
         return;  // void
     },
-    get_key_value: (t_token) => { false; },
+    get_key_value: (t_token) => {
+        let value = conf._key_values_test[t_token]
+        return value
+    },
     del_key_value: (t_token) => { 
         delete conf._key_values_test[t_token]
     },
     check_hash: async (hh_unidentified, ownership_key) => { return true; }
 }
-
 
 
 class lilDB {  // a mock that provides the DB interface
@@ -114,8 +117,8 @@ async function test1() {
 async function test2() {
     let stoks = new SessTable(db);
     //
-    stoks.set_general_token_timeout(200)
-    stoks.set_general_session_timeout(600)
+    stoks.set_general_token_timeout(600)
+    stoks.set_general_session_timeout(900)
 
     // console.dir(stoks)
     //
@@ -173,26 +176,33 @@ async function test2() {
         console.log("VERIFIED SESS TIMEOUT")
     }
 
+    stoks.set_token_timeout(t_token,800)
+    let ttimeout = stoks.get_token_timeout(t_token)
+    let tleft = stoks.get_token_time_left(t_token)
+    console.log("ttimeout:",ttimeout,t_token,"T_left",tleft)
+    //
+    console.log("SESSION TIME LEFT",stoks.get_session_time_left(sess))   /// DECREMENT TIMERS
+    stoks.decrement_timers()
+    //
+    //
+    tleft = stoks.get_token_time_left(t_token)
+    console.log("ttimeout (after):",ttimeout,t_token,"T_left",tleft)
+    //
+    stoks.allow_session_detach(sess)
+    stoks.detach_session(sess)
+    console.dir(await stoks.list_detached_sessions())
+    //
+    stoks.attach_session(sess)
+    stoks.set_disownment_token_timeout(tr2_token, 500)
 
-    /*
-    get_session_time_left(session_token)
-    allow_session_detach(session_token)
-    detach_session(session_token)
-    attach_session(session_token)
-    set_general_token_timeout(timeout)
-    set_disownment_token_timeout(t_token, timeout)
-    set_token_timeout(t_token, timeout)
-    get_token_timeout(t_token)
-    get_token_time_left(t_token)
-    set_token_sellable(t_token, amount)
-    unset_token_sellable(t_token) 
-    reload_session_info(session_token, ownership_key, hash_of_p2) 
-    reload_token_info(t_token)
-    list_tranferable_tokens(session_token)
-    list_sellable_tokens()
-    list_unassigned_tokens()
-    list_detached_sessions()
-    */
+    // SELLABLE TOKEN
+    stoks.set_token_sellable(tr2_token, 2.15)
+
+
+    let hash_of_p2 = "sdjsfsoijfsfosijf"
+
+    stoks.reload_session_info(sess, ownership_key, hash_of_p2) 
+    stoks.reload_token_info(t_token)
 
     console.log("_key_values_test:")
     console.dir(stoks._db._key_values_test)
@@ -213,11 +223,18 @@ async function test2() {
     console.log("_sessions_to_their_tokens:")
     console.dir(stoks._sessions_to_their_tokens)
     //
-
+    //
+    console.log("list_tranferable_tokens:")
     console.dir(await stoks.list_tranferable_tokens(sess))
+    console.log("list_sellable_tokens:")
     console.dir(await stoks.list_sellable_tokens())
+    console.log("list_unassigned_tokens:")
     console.dir(await stoks.list_unassigned_tokens())
+    console.log("list_detached_sessions:")
     console.dir(await stoks.list_detached_sessions())
+    //
+    console.log("map_sellable_tokens:")
+    console.dir(await stoks.map_sellable_tokens())
 
     //
     console.log("3--------------------------------------------")
@@ -245,6 +262,13 @@ async function test2() {
 
     console.log("(delete) _orphaned_tokens:")
     console.dir(stoks._orphaned_tokens)
+
+    // ---- ---- ---- ---- ---- ---- ---- ---- ---- ----
+    stoks.unset_token_sellable(tr2_token) 
+
+    console.log("(delete) list_unassigned_tokens:")
+    console.dir(await stoks.list_unassigned_tokens())
+
     
     //
 

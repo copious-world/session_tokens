@@ -187,7 +187,7 @@ class TokenTables {
      *
      */
     decrement_timers() {
-        for (let [sess_tok, time_info] of Object.entries(this._session_timing)) {
+        for (let [sess_tok, time_info] of this._session_timing.entries() ) {
             if (time_info._is_detached) {
                 let time_left = time_info._time_left_after_detachment;
                 time_left -= SESSION_CHOP_INTERVAL;
@@ -207,19 +207,19 @@ class TokenTables {
                     this.destroy_token(sess_tok);
                 }
                 else {
-                    time_info.time_left = time_left;
+                    time_info._time_left = time_left;
                 }
             }
             //
-            if (time_info.shared) { // session information only
+            if ( time_info._shared ) { // session information only
                 (async () => {
                     await this._db.set_key_value(sess_tok, JSON.stringify(time_info));
                 })();
             }
         }
-        for (let [t_tok, time_info] of Object.entries(this._token_timing)) {
+        for ( let [t_tok, time_info] of this._token_timing.entries() ) {
             if (time_info._is_detached) {
-                let time_left = time_info._time_left_after_detachment;
+                let time_left = time_info._time_left_after_detachment
                 time_left -= SESSION_CHOP_INTERVAL;
                 if (time_left <= 0) {
                     this._token_timing.delete(t_tok);
@@ -237,7 +237,7 @@ class TokenTables {
                     this.destroy_token(t_tok);
                 }
                 else {
-                    time_info.time_left = time_left;
+                    time_info._time_left = time_left;
                 }
             }
         }
@@ -380,8 +380,7 @@ class TokenTables {
             let value = this._token_to_information.get(t_token);
             if (value !== undefined) {
                 return value;
-            }
-            else {
+            } else {
                 let t_info_str = await this._db.get_key_value(t_token);
                 if (typeof t_info_str !== 'string') {
                     return (false);
@@ -455,11 +454,11 @@ class TokenTables {
         if (session_token !== undefined) {
             let sess_token_set = this._sessions_to_their_tokens.get(session_token);
             if (t_token && sess_token_set) {
-                this._token_to_session.set(t_token, session_token);
+                this._token_to_session.set(t_token, session_token)
                 sess_token_set.session_bounded.add(t_token);  // the tokens this session (hence, owner) bounds (and owns)
                 this._token_to_owner.set(t_token,ownership_key)  // from the token (unique) to the owner
                 // it may be transfered... later this can be removed or used.
-                await this.add_token(t_token, value);
+                await this.add_token(t_token,value)
             }
         }
     }
@@ -533,9 +532,9 @@ class TokenTables {
      */
     destroy_token(t_token) {
         let session_token = this._token_to_session.get(t_token);
-        if (session_token != undefined) {
+        if ( session_token != undefined ) {
             try {
-                this._token_to_session.delete(t_token);
+                this._token_to_session.delete(t_token)
                 this._token_to_information.delete(t_token);
                 this._db.del_key_value(t_token);
                 this._token_to_owner.delete(t_token);
@@ -777,7 +776,7 @@ class TokenTables {
      */
     async list_tranferable_tokens(session_token) {
         let sess_info = this._session_timing.get(session_token);
-        if ((sess_info !== undefined) && (sess_info._detachment_allowed)) {
+        if (sess_info !== undefined) {
             let sess_token_set = this._sessions_to_their_tokens.get(session_token);
             if (sess_token_set) {
                 return Array.from(sess_token_set.session_carries);
@@ -790,7 +789,7 @@ class TokenTables {
      * @returns
      */
     async list_sellable_tokens() {
-        let transferables = Array.from(Object.keys(this._all_tranferable_tokens));
+        let transferables = Array.from(this._all_tranferable_tokens.keys());
         transferables = transferables.filter((tok_key) => {
             let t_inf = this._all_tranferable_tokens.get(tok_key);
             if (t_inf !== undefined) {
@@ -798,6 +797,19 @@ class TokenTables {
             }
         });
         return transferables;
+    }
+    /**
+     * These list and map methods return promises in case a descendant prefers to use DB storage
+     * @returns  - a promise to deliver an map of TransitionToken to prices
+     */
+    async map_sellable_tokens() {
+        let seller_map = {}
+        for ( let [token,t_inf]  of this._all_tranferable_tokens.entries() ) {
+            if ( t_inf._sellable ) {
+                seller_map[token] = t_inf._price
+            }
+        }
+        return seller_map
     }
     /**
      *

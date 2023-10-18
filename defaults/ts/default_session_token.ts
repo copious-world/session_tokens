@@ -204,6 +204,7 @@ export interface TokenTablesAbstract {
     //
     list_tranferable_tokens : (session_token : SessionToken) =>  Promise<TransitionToken[]>
     list_sellable_tokens : () =>  Promise<TransitionToken[]>
+    map_sellable_tokens() : Promise<Object>
     list_unassigned_tokens : () =>  Promise<TransitionToken[]>
     list_detached_sessions : () =>  Promise<SessionToken[]>
 }
@@ -297,7 +298,7 @@ export class TokenTables implements TokenTablesAbstract {
      * 
      */
     decrement_timers() {
-        for ( let [sess_tok,time_info] of Object.entries(this._session_timing) ) {
+        for (let [sess_tok, time_info] of this._session_timing.entries() ) {
             if ( time_info._is_detached ) {
                 let time_left = time_info._time_left_after_detachment
                 time_left -= SESSION_CHOP_INTERVAL;
@@ -314,17 +315,17 @@ export class TokenTables implements TokenTablesAbstract {
                     this._session_timing.delete(sess_tok)
                     this.destroy_token(sess_tok)
                 }  else {
-                    time_info.time_left = time_left
+                    time_info._time_left = time_left;
                 }
             }
             //
-            if ( time_info.shared ) { // session information only
+            if ( time_info._shared ) { // session information only
                 (async () => {  // update this shared information
                     await this._db.set_key_value(sess_tok,JSON.stringify(time_info))
                 })()    
             }
         }
-        for ( let [t_tok,time_info] of Object.entries(this._token_timing) ) {
+        for ( let [t_tok, time_info] of this._token_timing.entries() ) {
             if ( time_info._is_detached ) {
                 let time_left = time_info._time_left_after_detachment
                 time_left -= SESSION_CHOP_INTERVAL;
@@ -341,7 +342,7 @@ export class TokenTables implements TokenTablesAbstract {
                     this._token_timing.delete(t_tok)
                     this.destroy_token(t_tok)
                 }  else {
-                    time_info.time_left = time_left
+                    time_info._time_left = time_left
                 }
             }
         }
@@ -480,6 +481,9 @@ export class TokenTables implements TokenTablesAbstract {
 
     /**
      * Given a transition token, adds it to the local tables plus the key value database.
+     * Only maps the token to its information (value) and to its timing status.
+     * Ownership and transferability is handled by calling methods.
+     * 
      * @param {TransitionToken} token - a transition token which be part of a transition object.
      * @param {string} value - any string value less than a pre-determined size that can be stored.
      */
@@ -588,6 +592,7 @@ export class TokenTables implements TokenTablesAbstract {
                 this._token_to_session.set(t_token, session_token)
                 sess_token_set.session_bounded.add(t_token);  // the tokens this session (hence, owner) bounds (and owns)
                 this._token_to_owner.set(t_token,ownership_key)  // from the token (unique) to the owner
+                // it may be transfered... later this can be removed or used.
                 await this.add_token(t_token,value)
             }
         }
@@ -938,7 +943,7 @@ export class TokenTables implements TokenTablesAbstract {
      */
     async list_tranferable_tokens(session_token : SessionToken) : Promise<TransitionToken[]> {
         let sess_info = this._session_timing.get(session_token)
-        if ( (sess_info !== undefined) && (sess_info._detachment_allowed) ) {
+        if (sess_info !== undefined) {
             let sess_token_set = this._sessions_to_their_tokens.get(session_token);
             if ( sess_token_set ) {
                 return Array.from(sess_token_set.session_carries)
@@ -952,7 +957,7 @@ export class TokenTables implements TokenTablesAbstract {
      * @returns  - a promise to deliver an array of TransitionToken
      */
     async list_sellable_tokens() : Promise<TransitionToken[]> {
-        let transferables = Array.from(Object.keys(this._all_tranferable_tokens))
+        let transferables = Array.from(this._all_tranferable_tokens.keys());
         transferables = transferables.filter((tok_key) => {
             let t_inf = this._all_tranferable_tokens.get(tok_key)
             if ( t_inf !== undefined ) {
@@ -961,6 +966,21 @@ export class TokenTables implements TokenTablesAbstract {
         })
         return transferables
     }
+
+    /**
+     * These list and map methods return promises in case a descendant prefers to use DB storage
+     * @returns  - a promise to deliver an map of TransitionToken to prices
+     */
+    async map_sellable_tokens() : Promise<Object> {
+        let seller_map = {}
+        for ( let [token,t_inf]  of this._all_tranferable_tokens.entries() ) {
+            if ( t_inf._sellable ) {
+                seller_map[token] = t_inf._price
+            }
+        }
+        return seller_map
+    }
+    
 
     /**
      * These list methods return promises in case a descendant prefers to use DB storage
