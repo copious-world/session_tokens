@@ -129,6 +129,10 @@ async function test2() {
 
     let ownership_key = "IAMOWNER"
 
+    let sess2 = stoks.create_token('session-')
+    let ownership2_key = "IAMOWNER_TOO"
+
+
     let check_key = await stoks.add_session(sess,ownership_key,t_token,true)
     console.log("check_key:",check_key,"\n--------")
 
@@ -167,6 +171,10 @@ async function test2() {
 
     if ( stoks.token_is_transferable(tr2_token)  ) {
         console.log("TOKEN IS TRANSFERABLE")
+        //
+        //
+        stoks.transfer_token(tr2_token, ownership_key, ownership2_key)
+
     }
 
     stoks.set_session_timeout(sess,700)
@@ -269,7 +277,6 @@ async function test2() {
     console.log("(delete) list_unassigned_tokens:")
     console.dir(await stoks.list_unassigned_tokens())
 
-    
     //
 
     stoks.shutdown()
