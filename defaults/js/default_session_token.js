@@ -465,7 +465,7 @@ class TokenTables {
     /**
      *
      * @param t_token
-     * @returns
+     * @returns {boolean}
      */
     token_is_transferable(t_token) {
         let tinf = this._all_tranferable_tokens.get(t_token);
@@ -515,7 +515,7 @@ class TokenTables {
      * @param t_token
      * @param session_token
      * @param owner
-     * @returns
+     * @returns {boolean}
      */
     async acquire_token(t_token, session_token, owner) {
         let value = await this.transition_token_is_active(t_token); // returns a token info obj in a JSON string
@@ -581,7 +581,7 @@ class TokenTables {
     /**
      *
      * @param session_token
-     * @returns
+     * @returns {Number|undefined}
      */
     get_session_timeout(session_token) {
         let s_time_info = this._session_timing.get(session_token);
@@ -593,7 +593,7 @@ class TokenTables {
     /**
      *
      * @param session_token
-     * @returns
+     * @returns {Number|undefined}
      */
     get_session_time_left(session_token) {
         let s_time_info = this._session_timing.get(session_token);
@@ -690,7 +690,7 @@ class TokenTables {
     /**
      *
      * @param t_token
-     * @returns
+     * @returns {Number|undefined}
      */
     get_token_time_left(t_token) {
         let time_info = this._token_timing.get(t_token);
@@ -772,7 +772,7 @@ class TokenTables {
     /**
      *
      * @param session_token
-     * @returns
+     * @returns {Array}
      */
     async list_tranferable_tokens(session_token) {
         let sess_info = this._session_timing.get(session_token);
@@ -786,7 +786,7 @@ class TokenTables {
     }
     /**
      *
-     * @returns
+     * @returns {boolean}
      */
     async list_sellable_tokens() {
         let transferables = Array.from(this._all_tranferable_tokens.keys());
@@ -813,14 +813,14 @@ class TokenTables {
     }
     /**
      *
-     * @returns
+     * @returns {Array}
      */
     async list_unassigned_tokens() {
         return Array.from(this._orphaned_tokens);
     }
     /**
      *
-     * @returns
+     * @returns {Array}
      */
     async list_detached_sessions() {
         return Array.from(this._detached_sessions);
