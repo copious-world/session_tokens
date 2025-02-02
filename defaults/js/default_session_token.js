@@ -257,7 +257,7 @@ class TokenTables {
         // hash_of_p2  hash of the second parameter per the hasher provided by the caching module
         // e.g.hh unidentified (an intermediate hash) in LRU manager of global_session
         let hash_of_p2 = await this._db.set_session_key_value(session_token, ownership_key); // return hh unidentified == xxhash of value (value == ownership key)
-        // later the session_token will be passed into get_session_key_value where it will be hashed into an augmented has token
+        // later the session_token will be passed into get_session_key_value where it will be hashed into an augmented hash token
         // for fetching hash_of_p2
         this._session_to_owner.set(session_token, ownership_key); // the session transition token
         this._owner_to_session.set(ownership_key,session_token)
@@ -289,9 +289,9 @@ class TokenTables {
      * Uses the hash value mapped by the session token along with the expected hash input to check for existence of the session
      */
     async active_session(session_token, ownership_key) {
-        let hh_unidentified = this._session_checking_tokens.get(session_token);
-        if (hh_unidentified) {
-            let truth = await this._db.check_hash(hh_unidentified, ownership_key);
+        let hash_of_p2 = this._session_checking_tokens.get(session_token);
+        if ( hash_of_p2 ) {
+            let truth = await this._db.check_hash(hash_of_p2, ownership_key);
             return truth;
         }
         return false;
