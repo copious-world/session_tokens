@@ -251,7 +251,7 @@ class TokenTables {
      * @param {Ucwid} ownership_key -- a string representation of an ownership ID such as a DID.
      * @param {TransitionToken} t_token -- a key into the token tables from which the session should be recoverable.
      * @param {bool} [shared] - if supplied, then information about the session will be stored in a shared DB
-     * @returns {Promise<Hash | undefined> } If the share parameter is used, then this will be a key for checking the activity of the session.
+     * @returns {Promise<Hash | boolean> } If the share parameter is used, then this will be a key for checking the activity of the session.
      */
     async add_session(session_token, ownership_key, t_token, shared) {
         // hash_of_p2  hash of the second parameter per the hasher provided by the caching module
@@ -281,11 +281,13 @@ class TokenTables {
             sti._shared = true;
             let value = JSON.stringify(sti);
             await this._db.set_key_value(session_token, value);
-            return hash_of_p2;
+            return hash_of_p2;      // only returned when sharing is requested....
         }
-        return; // no value === undefined
+        return false; // no value === false
     }
     /**
+     * active_session
+     * 
      * Uses the hash value mapped by the session token along with the expected hash input to check for existence of the session
      */
     async active_session(session_token, ownership_key) {
@@ -295,6 +297,23 @@ class TokenTables {
             return truth;
         }
         return false;
+    }
+    /**
+     * insert_active_session
+     * 
+     * This method is made available to subscribers of new session topics published by classers of add_session
+     * @param {SessionToken} session_token -- a token identifiying a session typically returned by a login process -- not a transition token
+     * @param {Hash} link_hash -- a hash derived by a storage server
+     */
+    quick_insert_active_session(session_token,link_hash) {
+        try {
+            this._session_checking_tokens.set(session_token,link_hash);
+        } catch (e) {}
+    }
+    discard_quick_insert(session_token) {
+        try {
+            this._session_checking_tokens.delete(session_token);
+        } catch (e) {}
     }
     /**
     *  Removes a sessions from the general discourse of all micro services given the state transition token that that keys the session
