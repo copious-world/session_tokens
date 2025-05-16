@@ -170,6 +170,9 @@ export interface TokenTablesAbstract {
     //
     add_session : (session_token : SessionToken, ownership_key : Ucwid, t_token : TransitionToken, shared? : boolean ) => Promise<Hash | undefined>
     active_session : (session_token : SessionToken, ownership_key : Ucwid) => Promise<boolean>
+    quick_insert_active_session : (session_token : SessionToken,link_hash : Hash) => void
+    discard_quick_insert: (session_token : SessionToken) => void
+
     destroy_session : (t_token : TransitionToken) => void
     allow_session_detach : (session_token : SessionToken) => void
     detach_session : (session_token : SessionToken) => void
@@ -415,6 +418,28 @@ export class TokenTables implements TokenTablesAbstract {
         return false
     }
 
+    /**
+     * insert_active_session
+     * 
+     * This method is made available to subscribers of new session topics published by classes using add_session
+     * @param {SessionToken} session_token -- a token identifiying a session typically returned by a login process -- not a transition token
+     * @param {Hash} link_hash -- a hash derived by a storage server
+     */
+    quick_insert_active_session(session_token : SessionToken,link_hash : Hash) {
+        try {
+            this._session_checking_tokens.set(session_token,link_hash);
+        } catch (e) {}
+    }
+
+    /**
+     * discard_quick_insert
+     * @param {string} session_token 
+     */
+    discard_quick_insert(session_token : SessionToken) {
+        try {
+            this._session_checking_tokens.delete(session_token);
+        } catch (e) {}
+    }
 
     /**
     *  Removes a sessions from the general discourse of all micro services given the state transition token that that keys the session

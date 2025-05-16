@@ -310,6 +310,10 @@ class TokenTables {
             this._session_checking_tokens.set(session_token,link_hash);
         } catch (e) {}
     }
+    /**
+     * discard_quick_insert
+     * @param {string} session_token 
+     */
     discard_quick_insert(session_token) {
         try {
             this._session_checking_tokens.delete(session_token);

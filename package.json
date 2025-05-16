@@ -1,6 +1,6 @@
 {
   "name": "session_tokens",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A library of classes that can be used to manage sessions and related tokens.",
   "main": "index.js",
   "scripts": {
