@@ -1,31 +1,32 @@
 {
-  "name": "session_tokens",
-  "version": "1.0.1",
-  "description": "A library of classes that can be used to manage sessions and related tokens.",
-  "main": "index.js",
-  "scripts": {
-    "test": "node ./tests/index.js"
-  },
-  "types": "./ts/index.d.ts",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/copious-world/session_tokens.git"
-  },
-  "funding": {
-    "type" : "GitHub Sponsors",
-    "url" : "https://github.com/sponsors/copious-world"
-  },
-  "keywords": [
-    "session",
-    "tokens",
-    "javascript",
-    "typescript",
-    "rust"
-  ],
-  "author": "R. Leddy",
-  "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/copious-world/session_tokens/issues"
-  },
-  "homepage": "https://github.com/copious-world/session_tokens#readme"
+    "name": "session_tokens",
+    "version": "1.0.1",
+    "description": "A library of classes that can be used to manage sessions and related tokens.",
+    "main": "index.js",
+    "scripts": {
+        "test": "node ./tests/index.js",
+        "gen-docs": "jsdoc --configure ./tools/jsdoc.conf -a all -R README.md --verbose"
+    },
+    "types": "./ts/index.d.ts",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/copious-world/session_tokens.git"
+    },
+    "funding": {
+        "type": "GitHub Sponsors",
+        "url": "https://github.com/sponsors/copious-world"
+    },
+    "keywords": [
+        "session",
+        "tokens",
+        "javascript",
+        "typescript",
+        "rust"
+    ],
+    "author": "R. Leddy",
+    "license": "MIT",
+    "bugs": {
+        "url": "https://github.com/copious-world/session_tokens/issues"
+    },
+    "homepage": "https://github.com/copious-world/session_tokens#readme"
 }
